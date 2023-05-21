@@ -2,14 +2,17 @@
 #![no_main] // もう後戻りできない感じがして興奮する
 
 mod frame_buffer;
+#[macro_use]
 mod font;
 mod graphics;
+mod console;
 
 use core::mem::{size_of};
 use core::panic::PanicInfo;
 use core::arch::asm;
 
-use font::write_ascii;
+use console::Console;
+use font::{IntoU8s};
 use frame_buffer::FrameBufferConfig;
 use graphics::{new_pixelwriter, RGBPixelWriter};
 
@@ -24,8 +27,10 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
         }
     }
 
-    for i in 0..26 {
-        write_ascii(pixelwriter, 50 + 8 * i, 50, ('A' as u8 + i as u8) as char, (128,128,128));
+    let mut console = Console::new(pixelwriter, (255,255,255), (0,0,0));
+    
+    for i in 0..30 {
+        print!(console, "line ", (i+1) as usize, "\n");
     }
 
     unsafe {

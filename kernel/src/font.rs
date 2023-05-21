@@ -12,6 +12,104 @@ pub fn write_ascii(writer: &dyn PixelWriter, x: u32, y: u32, c: char, color: Pix
     }
 }
 
+pub fn write_string(writer: &dyn PixelWriter, x: u32, y: u32, str: &[u8], color: PixelColor) {
+    for i in 0u32..str.len() as u32 {
+        write_ascii(writer, x + 8 * i, y, str[i as usize] as char, color);
+    }
+}
+
+pub fn u64_to_u8str(mut num: u64, buf: &mut [u8]) -> &mut [u8] {
+    assert!(buf.len() >= 1);
+
+    let mut seek = buf.len() - 1;
+
+    loop {
+        buf[seek] = ('0' as u64  + (num % 10)) as u8;
+        num /= 10;
+        if num == 0 {
+            return &mut buf[seek..];
+        }
+        if seek == 0 {
+            panic!(); // buffer was too small
+        }
+        seek -= 1;
+    }
+}
+
+pub fn concat_u8s<'a>(arr1: &[u8], arr2: &[u8], buf: &'a mut [u8]) -> &'a mut [u8] {
+    assert!(buf.len() >= arr1.len() + arr2.len());
+    buf[..arr1.len()].copy_from_slice(arr1);
+    buf[arr1.len()..arr1.len()+arr2.len()].copy_from_slice(arr2);
+    &mut buf[..arr1.len() + arr2.len()]
+}
+
+pub trait IntoU8s {
+    fn into_u8s<'a>(&self, buf: &'a mut [u8]) -> &'a mut [u8];
+}
+
+macro_rules! intou8s_integer {
+    ($($t:ty),*) => {
+        $(impl IntoU8s for $t {
+            fn into_u8s<'a>(&self, buf: &'a mut [u8]) -> &'a mut [u8] {
+                u64_to_u8str(*self as u64, buf)
+            }
+        })*
+    };
+}
+
+intou8s_integer!(usize, u8, u16, u32, u64, u128);
+
+
+impl IntoU8s for &'static str {
+    fn into_u8s<'a>(&self, buf: &'a mut [u8]) -> &'a mut [u8] {
+        let offset = buf.len() - self.len();
+        buf[offset..].copy_from_slice(self.as_bytes()); &mut buf[offset..]
+    }
+}
+
+impl IntoU8s for &[u8] {
+    fn into_u8s<'a>(&self, buf: &'a mut [u8]) -> &'a mut [u8] {
+        let offset = buf.len() - self.len();
+        buf[offset..].copy_from_slice(self); &mut buf[offset..]
+    }
+}
+
+
+impl IntoU8s for &mut [u8] {
+    fn into_u8s<'a>(&self, buf: &'a mut [u8]) -> &'a mut [u8] {
+        let offset = buf.len() - self.len();
+        buf[offset..].copy_from_slice(self); &mut buf[offset..]
+    }
+}
+
+#[macro_export]
+macro_rules! join_to_u8s {
+    ($buf:expr, $x:expr) => {{
+        $x.into_u8s($buf)
+    }};
+    ($buf:expr, $x: expr, $($y: expr),*) => {{
+        let mut xbuf = [0u8;128];
+        let x = $x.into_u8s(&mut xbuf);
+        
+        let len = $buf.len();
+        if x.len() > len {
+            $buf.copy_from_slice(&x[..len]); $buf
+        } else {
+            let mut ybuf = [0u8; 128];
+            let y = join_to_u8s!(&mut ybuf, $($y),*);
+            crate::font::concat_u8s(x, &y[..usize::min(y.len(), len-x.len())], $buf)
+        }
+    }};
+}
+
+macro_rules! print {
+    ($console:expr, $($x: expr),*) => {{ 
+        let mut buf = [0u8;128];
+        let x = join_to_u8s!(&mut buf, $($x),*);
+        $console.put_string(x);
+    }};
+}
+
 const FONTS: &[[u8;16]] = &[
 [
 0b00000000,

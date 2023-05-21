@@ -3,7 +3,7 @@
 
 mod frame_buffer;
 
-use core::mem::{transmute, size_of};
+use core::mem::{size_of};
 use core::panic::PanicInfo;
 use core::arch::asm;
 
@@ -13,6 +13,25 @@ use crate::frame_buffer::PixelFormat;
 
 
 type PixelColor = (u8,u8,u8);
+
+const FONT_A:  [u8; 16] = [
+    0b00000000, //
+    0b00011000, //    **
+    0b00011000, //    **
+    0b00011000, //    **
+    0b00011000, //    **
+    0b00100100, //   *  *
+    0b00100100, //   *  *
+    0b00100100, //   *  *
+    0b00100100, //   *  *
+    0b01111110, //  ******
+    0b01000010, //  *    *
+    0b01000010, //  *    *
+    0b01000010, //  *    *
+    0b11100111, // ***  ***
+    0b00000000, //
+    0b00000000, //
+];
 
 pub trait PixelWriter {
     fn write(&self, x: u32, y: u32, color: PixelColor);
@@ -26,7 +45,7 @@ impl<'a> PixelWriter for RGBPixelWriter<'a> {
     fn write(&self, x: u32, y: u32, color: PixelColor) {
         let fb_conf = self.fb_conf;
         
-        assert!(x < fb_conf.horizontal_resolution && y < fb_conf.vertical_resolution);
+        if x >= fb_conf.horizontal_resolution || y >= fb_conf.vertical_resolution {return;}
 
         let pixel_position = fb_conf.pixels_per_scanline * y + x;
         unsafe {
@@ -46,7 +65,7 @@ impl<'a> PixelWriter for BGRPixelWriter<'a> {
     fn write(&self, x: u32, y: u32, color: PixelColor) {
         let fb_conf = self.fb_conf;
         
-        assert!(x < fb_conf.horizontal_resolution && y < fb_conf.vertical_resolution);
+        if x >= fb_conf.horizontal_resolution || y >= fb_conf.vertical_resolution {return;}
         
         let pixel_position = fb_conf.pixels_per_scanline * y + x;
         unsafe {
@@ -58,6 +77,17 @@ impl<'a> PixelWriter for BGRPixelWriter<'a> {
     }
 }
 
+pub fn write_ascii(writer: &dyn PixelWriter, x: u32, y: u32, c: char, color: PixelColor) {
+    if c != 'A' {return};
+
+    for dy in 0..16u32 {
+        for dx in 0..8u32 {
+            if ((FONT_A[dy as usize] << dx) & 0b10000000) != 0 {
+                writer.write(x+dx, y+dy, color);
+            }
+        }
+    }
+}
 pub fn new_pixelwriter<'a>(buf: &mut [u8], fb_conf: &'a FrameBufferConfig) -> &'a dyn PixelWriter {
     match fb_conf.pixel_format {
         PixelFormat::PixelBGRResv8BitPerColor => {
@@ -84,9 +114,13 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
 
     for x in 0..fb_conf.horizontal_resolution {
         for y in 0..fb_conf.vertical_resolution {
-            pixelwriter.write(x, y, (127,127,127));
+            pixelwriter.write(x, y, (1,1,1));
         }
     }
+    
+    write_ascii(pixelwriter, 50, 50, 'A', (128,128,128));
+    write_ascii(pixelwriter, 50, 200, 'A', (255,255,255));
+
     unsafe {
         loop {
             asm!("hlt");

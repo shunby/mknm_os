@@ -23,9 +23,10 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
             pixelwriter.write(x, y, (1,1,1));
         }
     }
-    
-    write_ascii(pixelwriter, 50, 50, 'A', (128,128,128));
-    write_ascii(pixelwriter, 50, 200, 'A', (255,255,255));
+
+    for i in 0..26 {
+        write_ascii(pixelwriter, 50 + 8 * i, 50, ('A' as u8 + i as u8) as char, (128,128,128));
+    }
 
     unsafe {
         loop {

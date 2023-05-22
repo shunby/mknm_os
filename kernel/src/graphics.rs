@@ -1,4 +1,4 @@
-use core::mem::size_of;
+use core::{mem::size_of, ops::Add};
 
 use crate::frame_buffer::{FrameBufferConfig, PixelFormat};
 
@@ -64,6 +64,51 @@ pub fn new_pixelwriter<'a>(buf: &mut [u8], fb_conf: &'a FrameBufferConfig) -> &'
             unsafe {
                 *(buf.as_ptr() as *mut RGBPixelWriter) = RGBPixelWriter {fb_conf};
                 &*(buf.as_ptr() as *mut RGBPixelWriter)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Vec2<T>{
+    pub x: T,
+    pub y: T
+}
+
+impl<T> Vec2<T> {
+    pub fn new(x: T, y: T) -> Self {
+        Self {x,y}
+    }
+}
+
+impl<T> Add<&Vec2<T>> for &Vec2<T> where for<'a, 'b> &'a T: Add<&'b T, Output = T>{
+    type Output = Vec2<T>;
+    fn add(self, rhs: &Vec2<T>) -> Self::Output {
+        Vec2 {
+            x: (&self.x) + (&rhs.x),
+            y: (&self.y) + (&rhs.y) 
+        }
+    }
+}
+
+pub fn fill_rect(writer: &dyn PixelWriter, pos: Vec2<u32>, size: Vec2<u32>, c: PixelColor) {
+    for x in pos.x..pos.x + size.x {
+        for y in pos.y..pos.y + size.y {
+            writer.write(x, y, c);
+        }
+    }
+}
+
+pub fn draw_bitpattern<const N: usize>(writer: &dyn PixelWriter, pos: Vec2<u32>, pattern: &[u64;N], c: PixelColor, scale: u8) {
+    for dy in 0..N {
+        for dx in 0..64 {
+            if (pattern[dy] >> (63-dx)) & 1 == 1 {
+                fill_rect(
+                    writer, 
+                    &pos + &Vec2::new((scale*dx) as u32, (scale * dy as u8) as u32),
+                    Vec2::new(scale as u32, scale as u32), 
+                    c
+                );
             }
         }
     }

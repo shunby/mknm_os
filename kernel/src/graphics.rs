@@ -99,13 +99,13 @@ pub fn fill_rect(writer: &dyn PixelWriter, pos: Vec2<u32>, size: Vec2<u32>, c: P
     }
 }
 
-pub fn draw_bitpattern<const N: usize>(writer: &dyn PixelWriter, pos: Vec2<u32>, pattern: &[u64;N], c: PixelColor, scale: u8) {
+pub fn draw_bitpattern<const N: usize>(writer: &dyn PixelWriter, pos: Vec2<u32>, pattern: &[u64;N], c: PixelColor, scale: u32) {
     for dy in 0..N {
-        for dx in 0..64 {
+        for dx in 0usize..64 {
             if (pattern[dy] >> (63-dx)) & 1 == 1 {
                 fill_rect(
                     writer, 
-                    &pos + &Vec2::new((scale*dx) as u32, (scale * dy as u8) as u32),
+                    &pos + &Vec2::new(scale*dx as u32, scale * dy as u32),
                     Vec2::new(scale as u32, scale as u32), 
                     c
                 );

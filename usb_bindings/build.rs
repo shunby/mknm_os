@@ -19,8 +19,6 @@ pub fn main() {
 
     let base_dir = format!("{}/osbook/devenv/x86_64-elf", env::var_os("HOME").unwrap().to_str().unwrap());
 
-// bindgen wrapper.hpp -o bindings.rs -- -I. -I$HOME/osbook/devenv/x86_64-elf -I$HOME/osbook/devenv/x86_64-elf/include/c++/v1 -I$HOME/osbook/devenv/x86_64-elf/include -I$HOME/osbook/devenv/x86_64-elf/include/freetype2 -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -fno-exceptions -fno-rtti -std=c++17 -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone
-//  bindgen wrapper.hpp --use-core --ctypes-prefix cty -o bindings.rs -- -I. -I$HOME/osbook/devenv/x86_64-elf -I$HOME/osbook/devenv/x86_64-elf/include/c++/v1  -I$HOME/osbook/devenv/x86_64-elf/include -I$HOME/osbook/devenv/x86_64-elf/include/freetype2 -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -fno-exceptions -fno-rtti -std=c++17 -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone
     let bindings = bindgen::Builder::default()
         .use_core()
         .ctypes_prefix("cty")
@@ -31,16 +29,14 @@ pub fn main() {
             &format!("-I{base_dir}/include/c++/v1"), 
             &format!("-I{base_dir}/include"), 
             &format!("-I{base_dir}/include/freetype2"), 
-            // "-I/usr/lib/llvm-7/lib/clang/7.0.1/include/",
             "-nostdlibinc", 
             "-D__ELF__", "-D_LDBL_EQ_DBL", "-D_GNU_SOURCE", "-D_POSIX_TIMERS",
             "-fno-exceptions", "-fno-rtti",
             "-std=c++17", "-O2", "-Wall", "-g", "--target=x86_64-elf", "-ffreestanding", "-mno-red-zone"
-            // "-ffreestanding", "-mno-red-zone",
-            // "-fno-exceptions", "-fno-rtti",  "-O2", "-Wall", "-g", "--target=x86_64-elf"
+            , "-fno-inline-functions"
              ])
         .opaque_type("std::.*")
-        .allowlist_type("usb::xhci::Controller")
+        .generate_inline_functions(true)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate bindings");

@@ -15,8 +15,8 @@ CPPFLAGS += $(addprefix $(addprefix -I, $(BASEDIR)), $(LIBS))
 CPPFLAGS += -I$(BASEDIR) -I.\
 			-nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS \
 			-DEFIAPI='__attribute__((ms_abi))'
-CFLAGS   += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone
-CXXFLAGS += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone \
+CFLAGS   += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone -fno-inline-functions
+CXXFLAGS += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone -fno-inline-functions\
             -fno-exceptions -fno-rtti -std=c++17
 LDFLAGS  += -z norelro --static -L$(BASEDIR)/lib
 

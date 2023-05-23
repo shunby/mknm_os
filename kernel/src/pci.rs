@@ -1,4 +1,4 @@
-use core::{arch::global_asm, mem::MaybeUninit};
+use core::{arch::global_asm, mem::{MaybeUninit, transmute}};
 
 fn make_address(bus: u8, device: u8, function: u8, reg_addr: u8) -> u32 {
     let (bus, device, function, reg_addr) =
@@ -42,9 +42,15 @@ unsafe fn read_config_data() -> u32 {
 
 #[derive(Debug, Clone)]
 pub struct ClassCode {
-    base: u8,
-    sub: u8,
-    interface: u8,
+    pub base: u8,
+    pub sub: u8,
+    pub interface: u8,
+}
+
+impl ClassCode {
+    pub fn matches(&self, base: u8, sub: u8, interface: u8) -> bool {
+        (self.base, self.sub, self.interface) == (base, sub, interface)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +103,24 @@ impl PCIDevice {
         read_config_data()
     }
 
+    pub unsafe fn read_bar(&self, index: u8) -> u64 {
+        if index >= 6 {panic!()}
+        write_config_address(make_address(self.bus, self.device, self.function, 0x10 + 0x04 * index));
+        let bar = read_config_data() as u64;
+
+        // 32bit address
+        if (bar & 4) == 0 {
+            return bar;
+        }
+
+        // 64bit address: use 2 BAR slots
+        if index == 5 {panic!()}
+
+        write_config_address(make_address(self.bus, self.device, self.function, 0x10 + 0x04 * (index+1)));
+        let bar_upper = read_config_data() as u64;
+        (bar_upper << 32) | bar
+    }
+
     pub unsafe fn is_valid(&self) -> bool {
         self.read_vendor_id() != 0xffff
     }
@@ -120,8 +144,8 @@ impl PCIController {
         }
     }
 
-    pub fn get_devices(&self) -> &[MaybeUninit<PCIDevice>; 32] {
-        &self.devices
+    pub fn get_devices(&self) -> &[PCIDevice] {
+        unsafe {transmute(&self.devices[..self.num_devices])}
     }
 
     pub fn num_devices(&self) -> usize {

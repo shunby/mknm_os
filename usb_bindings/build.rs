@@ -37,6 +37,9 @@ pub fn main() {
              ])
         .opaque_type("std::.*")
         .generate_inline_functions(true)
+        .allowlist_function(".*SetPrintFn")
+        .allowlist_function(".*SetLogLevel")
+        .allowlist_function(".*set_default_mouse_observer")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate bindings");

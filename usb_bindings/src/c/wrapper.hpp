@@ -1,7 +1,6 @@
 #include "usb/xhci/xhci.hpp"
-
+#include "usb/classdriver/mouse.hpp"
 #include "logger.hpp"
-#include "usb/setupdata.hpp"
-#include "usb/device.hpp"
-#include "usb/descriptor.hpp"
-#include "usb/xhci/speed.hpp"
+namespace usb {
+    extern "C" void set_default_mouse_observer(void (*ptr)(int8_t, int8_t));
+}

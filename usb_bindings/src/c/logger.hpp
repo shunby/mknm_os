@@ -1,3 +1,6 @@
+/*
+  This file is a modified version of the original "logger.hpp" in mikanos.
+*/
 /**
  * @file logger.hpp
  *
@@ -29,3 +32,7 @@ void SetLogLevel(LogLevel level);
  * @param format  書式文字列．printk と互換．
  */
 int Log(LogLevel level, const char* format, ...);
+
+/** @brief ログ出力用関数を設定する．
+ */
+void SetPrintFn(void (*fn)(const char* s));

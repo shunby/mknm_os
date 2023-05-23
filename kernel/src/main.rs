@@ -7,7 +7,7 @@ mod font;
 mod graphics;
 mod console;
 
-use core::mem::{size_of};
+use core::mem::{size_of, MaybeUninit, transmute};
 use core::panic::PanicInfo;
 use core::arch::asm;
 
@@ -73,6 +73,23 @@ const LOGO: [u64;26] = [
     0b00000000000000000000001111110000000,
 ];
 
+// FIXME: not thread-safe or interruption-safe
+static mut console: MaybeUninit<Console> = MaybeUninit::uninit();
+static mut is_console_initialized: bool = false;
+fn get_console() -> &'static mut Console<'static> {
+    unsafe {
+        if !is_console_initialized {panic!()}
+        console.assume_init_mut()
+    }
+}
+
+fn init_console(consol: Console){
+    unsafe {
+        if is_console_initialized {panic!()}
+        console = MaybeUninit::new(transmute::<_, Console<'static>>(consol));
+        is_console_initialized = true;
+    }
+}
 
 
 #[no_mangle]
@@ -86,10 +103,10 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
         }
     }
 
-    let mut console = Console::new(pixelwriter, (255,255,255), (100,100,100));
+    init_console(Console::new(pixelwriter, (255,255,255), (100,100,100)));
     
     for i in 0..30 {
-        print!(console, "line ", (i+1) as usize, "\n");
+        print!("line ", (i+1) as usize, "\n");
     }
 
     for dy in 0..MOUSE_CURSOR_DIMENSION.1 {
@@ -113,5 +130,8 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    if let Some(loc) = _info.location() {
+        print!("panicked: ", loc.file().as_bytes(), ": ", loc.line());
+    }
     loop {}
 }

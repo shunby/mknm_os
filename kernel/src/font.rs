@@ -102,14 +102,15 @@ macro_rules! join_to_u8s {
     }};
 }
 
+#[macro_export]
 macro_rules! print {
-    ($console:expr, $($x: expr),*) => {{ 
+    ($($x: expr),*) => {{ 
+        use $crate::font::IntoU8s;
         let mut buf = [0u8;128];
         let x = join_to_u8s!(&mut buf, $($x),*);
-        $console.put_string(x);
+        $crate::get_console().put_string(x);
     }};
 }
-
 const FONTS: &[[u8;16]] = &[
 [
 0b00000000,

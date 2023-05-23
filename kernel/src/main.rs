@@ -6,15 +6,16 @@ mod frame_buffer;
 mod font;
 mod graphics;
 mod console;
+mod pci;
 
 use core::mem::{size_of, MaybeUninit, transmute};
 use core::panic::PanicInfo;
 use core::arch::asm;
 
 use console::Console;
-use font::{IntoU8s};
 use frame_buffer::FrameBufferConfig;
 use graphics::{new_pixelwriter, RGBPixelWriter, draw_bitpattern, Vec2};
+use pci::{PCIController, PCIDevice};
 
 const MOUSE_CURSOR_DIMENSION: (usize, usize) = (15, 24);
 const MOUSE_CURSOR_SHAPE: [&'static str; MOUSE_CURSOR_DIMENSION.1] = [
@@ -91,6 +92,19 @@ fn init_console(consol: Console){
     }
 }
 
+fn scan_pci_devices() {
+    let mut pci = PCIController::new();
+    unsafe {pci.scan_all_bus().unwrap();}
+
+    let devices = pci.get_devices();
+    
+    for i in 0..pci.num_devices() {
+        let dev: &PCIDevice = unsafe{devices[i].assume_init_ref()};
+        let index = dev.get_index();
+        print!(index.0, ".", index.1, ".", index.2, ": head ", unsafe {dev.read_header_type()}, "\n");        
+    }
+
+}
 
 #[no_mangle]
 pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
@@ -108,6 +122,8 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
     for i in 0..30 {
         print!("line ", (i+1) as usize, "\n");
     }
+    
+    scan_pci_devices();
 
     for dy in 0..MOUSE_CURSOR_DIMENSION.1 {
         for dx in 0..MOUSE_CURSOR_DIMENSION.0 {

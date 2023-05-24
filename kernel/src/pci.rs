@@ -1,4 +1,6 @@
-use core::{arch::global_asm, mem::{MaybeUninit, transmute}};
+use core::{arch::global_asm, mem::{MaybeUninit, transmute, transmute_copy}};
+
+use bitfield::bitfield;
 
 fn make_address(bus: u8, device: u8, function: u8, reg_addr: u8) -> u32 {
     let (bus, device, function, reg_addr) =
@@ -28,16 +30,14 @@ io_in_32:
 "#
 );
 
-unsafe fn write_config_address(address: u32) {
+unsafe fn read_confreg(address: u32) -> u32 {
     io_out_32(CONFIG_ADDRESS, address);
-}
-
-unsafe fn write_config_data(value: u32) {
-    io_out_32(CONFIG_DATA, value);
-}
-
-unsafe fn read_config_data() -> u32 {
     io_in_32(CONFIG_DATA)
+}
+
+unsafe fn write_confreg(address: u32, value: u32) {
+    io_out_32(CONFIG_ADDRESS, address);
+    io_out_32(CONFIG_DATA, value);
 }
 
 #[derive(Debug, Clone)]
@@ -73,14 +73,22 @@ impl PCIDevice {
         (self.bus, self.device, self.function)
     }
 
+    pub unsafe fn read_confreg(&self, reg_addr: u8) -> u32 {
+        read_confreg(make_address(self.bus, self.device, self.function, reg_addr))
+    }
+    
+    pub unsafe fn write_confreg(&self, reg_addr: u8, value: u32) {
+        write_confreg(make_address(self.bus, self.device, self.function, reg_addr), value);
+    }
+
     pub unsafe fn read_header_type(&self) -> u8 {
-        write_config_address(make_address(self.bus, self.device, self.function, 0x0c));
-        ((read_config_data() >> 16) & 0x00ff) as u8
+        let data = self.read_confreg(0x0c);
+        ((data >> 16) & 0x00ff) as u8
     }
 
     pub unsafe fn read_vendor_id(&self) -> u16 {
-        write_config_address(make_address(self.bus, self.device, self.function, 0x0));
-        (read_config_data() & 0xffff) as u16
+        let data = self.read_confreg(0x0);
+        (data & 0xffff) as u16
     }
 
     pub unsafe fn is_single_function_device(&self) -> bool {
@@ -89,8 +97,7 @@ impl PCIDevice {
     }
 
     pub unsafe fn read_class_code(&self) -> ClassCode {
-        write_config_address(make_address(self.bus, self.device, self.function, 0x08));
-        let reg = read_config_data();
+        let reg = self.read_confreg(0x08);
         ClassCode {
             base: ((reg >> 24) & 0xff) as u8,
             sub: ((reg >> 16) & 0xff) as u8,
@@ -99,14 +106,12 @@ impl PCIDevice {
     }
 
     pub unsafe fn read_bus_numbers(&self) -> u32 {
-        write_config_address(make_address(self.bus, self.device, self.function, 0x18));
-        read_config_data()
+        self.read_confreg(0x18)
     }
 
     pub unsafe fn read_bar(&self, index: u8) -> u64 {
         if index >= 6 {panic!()}
-        write_config_address(make_address(self.bus, self.device, self.function, 0x10 + 0x04 * index));
-        let bar = read_config_data() as u64;
+        let bar = self.read_confreg(0x10 + 0x04 * index) as u64;
 
         // 32bit address
         if (bar & 4) == 0 {
@@ -116,16 +121,18 @@ impl PCIDevice {
         // 64bit address: use 2 BAR slots
         if index == 5 {panic!()}
 
-        write_config_address(make_address(self.bus, self.device, self.function, 0x10 + 0x04 * (index+1)));
-        let bar_upper = read_config_data() as u64;
+        let bar_upper = self.read_confreg(0x10 + 0x04 * (index+1)) as u64;
         (bar_upper << 32) | bar
+    }
+
+    pub unsafe fn read_cap_ptr(&self) -> u8 {
+        (self.read_confreg(0x34) & 0xff) as u8
     }
 
     pub unsafe fn is_valid(&self) -> bool {
         self.read_vendor_id() != 0xffff
     }
 }
-
 pub struct PCIController {
     devices: [MaybeUninit<PCIDevice>; 32],
     num_devices: usize,
@@ -218,5 +225,115 @@ impl PCIController {
             self.scan_bus(secondary_bus)?;
         }
         Ok(device)
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum PCICapabilityId {
+    MSI = 0x05,
+}
+
+#[repr(packed)]
+#[repr(C)]
+pub struct PCICapabilityHeader {
+    cap_id: u8,
+    next_cap_ptr: u8,
+    _a: u16,
+}
+
+#[repr(u8)]
+pub enum MSIDestinationMode {
+    Fixed = 0b000,
+}
+
+
+
+bitfield!{
+    struct MSICapabilityHeader (u32);
+    u8;
+    cap_id, _: 7,0;
+    next_cap_ptr, _: 15,8;
+    msi_enable, set_msi_enable: 16;
+    multi_msg_capable, _: 19,17;
+    multi_msg_enable, set_multi_msg_enable: 22,20;
+    addr_64_capable, _: 23;
+    per_vector_mask_capable, _: 24;
+}
+
+bitfield!{
+    struct MSIMessageAddr (u32);
+    u16;
+    destination_mode, set_destination_mode: 2;
+    redirection_hint, set_redirection_hint: 3;
+    destination_id, set_destination_id: 19,12;
+    fee, set_FEE: 31, 20;
+}
+
+bitfield!{
+    struct MSIMessageData (u32);
+    u8;
+    vector, set_vector: 7,0;
+    delivery_mode, set_delivery_mode: 10,8;
+    trigger_level, set_trigger_level: 14;
+    trigger_mode, set_trigger_mode: 15;
+}
+
+fn configure_msi_register(dev: &PCIDevice, cap_addr: u8, apic_id: u8, vector: u8) {
+    unsafe {
+        let mut header: MSICapabilityHeader = transmute(dev.read_confreg(cap_addr));
+        let mut msg_addr: MSIMessageAddr = transmute(dev.read_confreg(cap_addr+4));
+        let msg_data_addr = 
+            if header.addr_64_capable() {cap_addr + 12} else {cap_addr + 8};
+        let mut msg_data: MSIMessageData = transmute(dev.read_confreg(msg_data_addr));
+        
+        print!("header: addr ", cap_addr, ", msi_enable", header.msi_enable() as u8, ", 64bit ", header.addr_64_capable() as u8, "\n");
+        print!("msg_addr: destination id ", msg_addr.destination_id() as u8, "\n");
+        print!("header: ", transmute_copy::<_,u32>(&header), "\n");
+        print!("msg_addr: ", transmute_copy::<_,u32>(&msg_addr), "\n");
+        print!("msg_data: addr ", msg_data_addr, ", ", transmute_copy::<_,u32>(&msg_data), "\n");
+        print!("----------------------------------------------------\n");
+        header.set_msi_enable(true);
+        msg_addr.set_destination_id(apic_id as u16);
+        msg_addr.set_FEE(0xfee);
+        msg_data.set_delivery_mode(0);
+        msg_data.set_trigger_mode(true);
+        msg_data.set_trigger_level(true);
+        msg_data.set_vector(vector);
+        msg_addr.set_redirection_hint(false);
+        
+        dev.write_confreg(cap_addr, transmute(header));
+        dev.write_confreg(cap_addr + 4, transmute(msg_addr));
+        dev.write_confreg(msg_data_addr, transmute(msg_data));
+
+        
+        let header: MSICapabilityHeader = transmute(dev.read_confreg(cap_addr));
+        let msg_addr: MSIMessageAddr = transmute(dev.read_confreg(cap_addr+4));
+        let msg_data: MSIMessageData = transmute(dev.read_confreg(msg_data_addr));
+        
+        print!("header: addr ", cap_addr, ", msi_enable", header.msi_enable() as u8, ", 64bit ", header.addr_64_capable() as u8, "\n");
+        print!("msg_addr: destination id ", msg_addr.destination_id() as u8, "\n");
+        print!("header: ", transmute_copy::<_,u32>(&header), "\n");
+        print!("msg_addr: ", transmute_copy::<_,u32>(&msg_addr), "\n");
+        print!("msg_data: ", transmute_copy::<_,u32>(&msg_data), "\n");
+    }
+}
+
+pub fn configure_msi_fixed_destination(
+        dev: &PCIDevice, apic_id: u8, vector: u8) {
+    unsafe {
+        let mut cap_addr = dev.read_cap_ptr();
+        while cap_addr != 0 {
+            let header: PCICapabilityHeader = transmute(dev.read_confreg(cap_addr));
+            
+            print!("!header: addr ", cap_addr, ", cap_id: ", header.cap_id, "\n");
+            print!("!header: ", transmute_copy::<_,u32>(&header), "\n");
+       
+            if header.cap_id == PCICapabilityId::MSI as u8 {
+                configure_msi_register(dev, cap_addr, apic_id, vector);
+                return;
+            }
+            cap_addr = header.next_cap_ptr;
+        }
     }
 }

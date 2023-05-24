@@ -1,5 +1,6 @@
 #![no_std]
-#![no_main] // もう後戻りできない感じがして興奮する
+#![no_main]
+#![feature(abi_x86_interrupt)]
 
 mod frame_buffer;
 #[macro_use]
@@ -8,18 +9,23 @@ mod graphics;
 mod console;
 mod pci;
 mod mouse;
+mod interrupt;
 
 use core::mem::{size_of, MaybeUninit, transmute};
 use core::panic::PanicInfo;
-use core::arch::asm;
+use core::arch::{asm, global_asm};
+use core::ptr::write_volatile;
 
 use console::Console;
 use frame_buffer::FrameBufferConfig;
 use graphics::{new_pixelwriter, RGBPixelWriter, draw_bitpattern, Vec2};
+use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use mouse::MouseCursor;
-use pci::{PCIController, PCIDevice};
+use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
-use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_default_mouse_observer};
+use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_default_mouse_observer, usb_xhci_Controller};
+
+use crate::interrupt::set_interrupt_flag;
 
 
 const LOGO: [u64;26] = [
@@ -52,32 +58,20 @@ const LOGO: [u64;26] = [
 ];
 
 // FIXME: not thread-safe or interruption-safe
-struct Peripheral<'a> {
-    console: Console<'a>,
-    mouse: MouseCursor<'a>
-}
-static mut PERIPHERAL: MaybeUninit<Peripheral> = MaybeUninit::uninit();
-static mut IS_PERIPHERAL_INITIALIZED: bool = false;
+static mut CONSOLE: MaybeUninit<Console> = MaybeUninit::uninit();
+static mut MOUSE: MaybeUninit<MouseCursor> = MaybeUninit::uninit();
+static mut XHC: MaybeUninit<usb_xhci_Controller> = MaybeUninit::uninit();
+
 fn get_console() -> &'static mut Console<'static> {
-    unsafe {
-        if !IS_PERIPHERAL_INITIALIZED {panic!()}
-        &mut PERIPHERAL.assume_init_mut().console
-    }
+    unsafe { CONSOLE.assume_init_mut() }
 }
 
 fn get_mouse() -> &'static mut MouseCursor<'static> {
-    unsafe {
-        if !IS_PERIPHERAL_INITIALIZED {panic!()}
-        &mut PERIPHERAL.assume_init_mut().mouse
-    }
+    unsafe { MOUSE.assume_init_mut() }
 }
 
-fn init_peripheral(periph: Peripheral){
-    unsafe {
-        if IS_PERIPHERAL_INITIALIZED {panic!()}
-        PERIPHERAL = MaybeUninit::new(transmute::<_, Peripheral<'static>>(periph));
-        IS_PERIPHERAL_INITIALIZED = true;
-    }
+fn get_xhc() -> &'static mut usb_xhci_Controller {
+    unsafe { XHC.assume_init_mut() }
 }
 
 fn scan_pci_devices() {
@@ -122,9 +116,8 @@ unsafe extern "C" fn mouse_observer(x: i8, y: i8) {
     get_mouse().move_relative(Vec2::new(x as i32, y as i32));
 }
 
-fn mouse_event_loop() {
+fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
     unsafe {
-        let xhc = find_xhc_device();
         let xhc_bar = xhc.read_bar(0);
         let xhc_mmio_base = xhc_bar & !(0b1111 as u64);
         let mut xhc = usb_bindings::raw::usb_xhci_Controller::new(xhc_mmio_base as usize);
@@ -145,16 +138,8 @@ fn mouse_event_loop() {
                 }
             }
         }
-        print!("entering main loop\n");
-
-        loop {
-            let err = usb_xhci_ProcessEvent(&mut xhc);
-            if err.code_ != 0 {
-                print!("error while processevent: ", err.code_, "\n");
-            }
-        }
+        xhc
     }
-
 }
 
 unsafe extern "C" fn print_c(mut s: *const cty::c_char) {
@@ -179,12 +164,18 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
         }
     }
 
-    init_peripheral(
-        Peripheral { 
-            console: Console::new(pixelwriter, (255,255,255), (100,100,100)),
-            mouse: MouseCursor::new(pixelwriter, (100,100,100), Vec2::new(200,300))
-        }
-    );
+    unsafe {
+        CONSOLE = transmute(MaybeUninit::new(Console::new(
+            pixelwriter,
+            (255,255,255),
+            (100,100,100)
+        )));
+        MOUSE = transmute(MaybeUninit::new(MouseCursor::new(
+            pixelwriter, 
+            (100,100,100),
+            Vec2::new(200,300)
+        )));
+    }
 
     unsafe{
         usb_bindings::raw::SetLogLevel(1);
@@ -192,7 +183,27 @@ pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
     }
     draw_bitpattern(pixelwriter, Vec2{x:100u32,y:100u32}, &LOGO, (0,0,255), 5);
     scan_pci_devices();
-    mouse_event_loop();
+
+    unsafe {
+        set_idt_entry(
+            IVIndex::XHCI, 
+            InterruptDescriptor::new(
+                get_cs(), 
+                InterruptDescriptorAttribute::new(0, DescriptorType::InterruptGate), 
+                transmute(interrupt_handler as *const fn())
+            )
+        );
+        load_idt();
+        let xhc = find_xhc_device();
+        let local_apic_id = *(0xfee00020 as *const u32) >> 24;
+        print!("apic_id: ", local_apic_id, "\n");
+        configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
+    
+        XHC = MaybeUninit::new(initialize_xhci_controller(&xhc));
+        set_interrupt_flag(true);
+    }
+
+    print!("finish\n");
     unsafe {
         loop {
             asm!("hlt");
@@ -206,4 +217,37 @@ fn panic(_info: &PanicInfo) -> ! {
         print!("panicked: ", loc.file().as_bytes(), ": ", loc.line());
     }
     loop {}
+}
+
+extern "sysv64" {
+    fn get_cs() -> u16;
+}
+global_asm!(r#"
+get_cs:
+    xor eax, eax
+    mov ax, cs
+    ret
+"#);
+
+#[allow(dead_code)]
+extern "x86-interrupt" fn interrupt_handler() {
+    // print!("mouse move!\n");
+    unsafe {
+        let xhc = get_xhc();
+        while (&*xhc.PrimaryEventRing()).HasFront()  {
+            let err = usb_xhci_ProcessEvent(xhc);
+            if err.code_ != 0 {
+                print!("error while processevent: ", err.code_, "\n");
+            }
+        }
+    }
+    notify_end_of_interrupt();
+}
+
+fn notify_end_of_interrupt() {
+    unsafe {
+        let end_of_interrupt: *mut u32 = transmute(0xfee000b0u64);
+        write_volatile(end_of_interrupt, 0);
+    }
+
 }

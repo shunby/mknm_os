@@ -17,14 +17,15 @@ use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 
 use console::Console;
-use frame_buffer::FrameBufferConfig;
-use graphics::{new_pixelwriter, RGBPixelWriter, draw_bitpattern, Vec2};
+use frame_buffer::{FrameBufferRaw};
+use graphics::{Vec2};
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use mouse::MouseCursor;
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
 use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_default_mouse_observer, usb_xhci_Controller};
 
+use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
 
 
@@ -61,6 +62,7 @@ const LOGO: [u64;26] = [
 static mut CONSOLE: MaybeUninit<Console> = MaybeUninit::uninit();
 static mut MOUSE: MaybeUninit<MouseCursor> = MaybeUninit::uninit();
 static mut XHC: MaybeUninit<usb_xhci_Controller> = MaybeUninit::uninit();
+static mut GRAPHICS: MaybeUninit<Graphics> = MaybeUninit::uninit();
 
 fn get_console() -> &'static mut Console<'static> {
     unsafe { CONSOLE.assume_init_mut() }
@@ -72,6 +74,10 @@ fn get_mouse() -> &'static mut MouseCursor<'static> {
 
 fn get_xhc() -> &'static mut usb_xhci_Controller {
     unsafe { XHC.assume_init_mut() }
+}
+
+fn get_graphics() -> &'static mut Graphics<'static> {
+    unsafe { GRAPHICS.assume_init_mut() }
 }
 
 fn scan_pci_devices() {
@@ -154,37 +160,30 @@ unsafe extern "C" fn print_c(mut s: *const cty::c_char) {
 }
 
 #[no_mangle]
-pub extern "C" fn KernelMain(fb_conf: FrameBufferConfig) -> ! {
-    let mut pixelwriter_buf = [0u8; size_of::<RGBPixelWriter>()];
-    let pixelwriter = new_pixelwriter(&mut pixelwriter_buf, &fb_conf);
-
-    for x in 0..fb_conf.horizontal_resolution {
-        for y in 0..fb_conf.vertical_resolution {
-            pixelwriter.write(x, y, (100,100,100));
-        }
-    }
-
+pub extern "C" fn KernelMain(fb: FrameBufferRaw) -> ! {
     unsafe {
+        GRAPHICS = transmute(MaybeUninit::new(Graphics::new(fb.into())));
         CONSOLE = transmute(MaybeUninit::new(Console::new(
-            pixelwriter,
+            get_graphics(),
             (255,255,255),
             (100,100,100)
         )));
         MOUSE = transmute(MaybeUninit::new(MouseCursor::new(
-            pixelwriter, 
+            get_graphics(),
             (100,100,100),
             Vec2::new(200,300)
         )));
     }
-
     unsafe{
         usb_bindings::raw::SetLogLevel(1);
         usb_bindings::raw::SetPrintFn(Some(print_c));
     }
-    draw_bitpattern(pixelwriter, Vec2{x:100u32,y:100u32}, &LOGO, (0,0,255), 5);
-    scan_pci_devices();
-
+    
     unsafe {
+        let graphics = get_graphics();
+        graphics.fill_rect((0,0).into(), graphics.resolution().into(), (100,100,100));
+        graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
+        scan_pci_devices();
         set_idt_entry(
             IVIndex::XHCI, 
             InterruptDescriptor::new(

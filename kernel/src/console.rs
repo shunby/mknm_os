@@ -1,9 +1,9 @@
-use crate::{graphics::{PixelWriter, PixelColor}, font::{write_ascii, write_string}};
+use crate::{graphics::{PixelColor, Graphics}, font::{write_ascii, write_string}};
 
 const ROWS: usize = 25;
 const COLS: usize = 80;
 pub struct Console<'a> {
-    writer: &'a dyn PixelWriter,
+    graphics: &'a mut Graphics<'a>,
     fg_color: PixelColor,
     bg_color: PixelColor,
     buffer: [[u8;COLS+1];ROWS],
@@ -13,19 +13,19 @@ pub struct Console<'a> {
 
 
 impl<'a> Console<'a> {
-    pub fn new(writer: &'a dyn PixelWriter, fg_color: PixelColor, bg_color: PixelColor) -> Self {
-        Self { writer, fg_color, bg_color, buffer: [[0;COLS+1];ROWS], cursor_row: 0, cursor_col: 0 }
+    pub fn new(graphics: &'a mut Graphics<'a>, fg_color: PixelColor, bg_color: PixelColor) -> Self {
+        Self { graphics, fg_color, bg_color, buffer: [[0;COLS+1];ROWS], cursor_row: 0, cursor_col: 0 }
     }
 
     fn scroll_up(&mut self) {
         for y in 0..16 * ROWS {
             for x in 0..8 * COLS {
-                self.writer.write(x as u32, y as u32, self.bg_color);
+                self.graphics.write_pixel((x as u32, y as u32).into(), self.bg_color);
             }
         }
         for row in 0..ROWS-1 {
             self.buffer[row] = self.buffer[row+1];
-            write_string(self.writer, 0, row as u32 * 16, &self.buffer[row], self.fg_color);
+            write_string(self.graphics, 0, row as u32 * 16, &self.buffer[row], self.fg_color);
         }
         self.buffer[ROWS-1] = [0u8; COLS+1];
     }
@@ -45,7 +45,7 @@ impl<'a> Console<'a> {
             if *c as char == '\n' {
                 self.new_line();
             } else {
-                write_ascii(self.writer, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
+                write_ascii(self.graphics, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
                 // FIXME: out of range
                 self.buffer[self.cursor_row][self.cursor_col] = *c;
                 self.cursor_col += 1;

@@ -1,20 +1,20 @@
-use crate::graphics::{PixelWriter, PixelColor};
+use crate::graphics::{PixelColor, Graphics};
 
-pub fn write_ascii(writer: &dyn PixelWriter, x: u32, y: u32, c: char, color: PixelColor) {
+pub fn write_ascii(graphics: &mut Graphics, x: u32, y: u32, c: char, color: PixelColor) {
     if c as usize >= FONTS.len() {return;}
 
     for dy in 0..16u32 {
         for dx in 0..8u32 {
             if ((FONTS[c as usize][dy as usize] << dx) & 0b10000000) != 0 {
-                writer.write(x+dx, y+dy, color);
+                graphics.write_pixel((x+dx, y+dy).into(), color);
             }
         }
     }
 }
 
-pub fn write_string(writer: &dyn PixelWriter, x: u32, y: u32, str: &[u8], color: PixelColor) {
+pub fn write_string(graphics: &mut Graphics, x: u32, y: u32, str: &[u8], color: PixelColor) {
     for i in 0u32..str.len() as u32 {
-        write_ascii(writer, x + 8 * i, y, str[i as usize] as char, color);
+        write_ascii(graphics, x + 8 * i, y, str[i as usize] as char, color);
     }
 }
 

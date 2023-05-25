@@ -1,6 +1,7 @@
 use core::{slice::{from_raw_parts_mut}};
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub enum PixelFormat {
     PixelRGBResv8BitPerColor,
     PixelBGRResv8BitPerColor
@@ -23,7 +24,7 @@ pub struct FrameBufferRaw {
     pub pixel_format: PixelFormat,
 }
 
-impl<'a> Into<FrameBuffer<'a>> for FrameBufferRaw {
+impl<'a> Into<FrameBuffer<'a>> for &FrameBufferRaw {
     fn into(self) -> FrameBuffer<'a> {
         let len = (self.pixels_per_scanline * self.vertical_resolution * 4) as usize;
         FrameBuffer {

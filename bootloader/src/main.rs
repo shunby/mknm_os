@@ -3,13 +3,15 @@
 
 mod elf; 
 mod frame_buffer;
+mod memory_map;
 
 extern crate alloc;
 
 use core::{arch::asm, mem::{transmute}};
 
 use frame_buffer::{FrameBufferConfig, PixelFormat};
-use uefi::{prelude::*, table::{boot::{AllocateType, MemoryType, SearchType, ScopedProtocol, OpenProtocolParams, OpenProtocolAttributes}}, proto::{console::gop::GraphicsOutput}, Result, data_types::PhysicalAddress};
+use memory_map::MemoryMapRaw;
+use uefi::{prelude::*, table::{boot::{AllocateType, MemoryType, SearchType, ScopedProtocol, OpenProtocolParams}}, proto::{console::gop::GraphicsOutput}, Result, data_types::PhysicalAddress};
 
 use crate::elf::{read_elf, Elf64_PhdrType, calc_load_address_range};
 
@@ -35,7 +37,22 @@ fn print_gop_info(gop: &mut ScopedProtocol<GraphicsOutput>) {
         );
 }
 
-type EntryPointFn = extern "sysv64" fn(FrameBufferConfig);
+fn get_memory_map(boot_services: &BootServices, buf: &mut [u8]) -> MemoryMapRaw{
+    let size = boot_services.memory_map_size();
+    assert!(size.map_size <= buf.len());
+    let buf_ptr = &buf[0] as *const u8;
+    let memmap = boot_services.memory_map(buf).expect("failed to get memory map");
+    unsafe {
+        MemoryMapRaw {
+            buffer: buf_ptr,
+            map_size: size.map_size as u64,
+            map_key: transmute(memmap.key()), 
+            descriptor_size: size.entry_size as u64, 
+        }
+    }
+}
+
+type EntryPointFn = extern "sysv64" fn(*const FrameBufferConfig, *const MemoryMapRaw);
 fn load_kernel(boot_services: &BootServices, image_handle: Handle) -> *const EntryPointFn {
     let mut fs = boot_services.get_image_file_system(image_handle).expect("failed to get file system");
     let kernel_file = fs.read(cstr16!("\\kernel.elf")).expect("failed to read '\\kernel.elf'");
@@ -99,10 +116,13 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let frame_buffer_config = construct_frame_buffer(boot_services)
         .expect("failed to construct frame buffer config");
 
+    let mut memmap_buf = [0u8; 4096*4];
+    let memmap = get_memory_map(boot_services, &mut memmap_buf);
+
     let (_, _) = system_table.exit_boot_services();
 
     //FIXME: GOPのFrameBufferをboot_servicesの外に持ち出してしまっている
-    entry_point(frame_buffer_config);
+    entry_point(&frame_buffer_config as _, &memmap as _);
 
     halt();
 }

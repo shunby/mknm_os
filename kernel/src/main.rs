@@ -10,8 +10,9 @@ mod console;
 mod pci;
 mod mouse;
 mod interrupt;
+mod memory_map;
 
-use core::mem::{size_of, MaybeUninit, transmute};
+use core::mem::{MaybeUninit, transmute};
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
@@ -20,6 +21,7 @@ use console::Console;
 use frame_buffer::{FrameBufferRaw};
 use graphics::{Vec2};
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
+use memory_map::{MemoryMapRaw, MemoryMap};
 use mouse::MouseCursor;
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
@@ -27,6 +29,7 @@ use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_d
 
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
+use crate::memory_map::MemoryDescriptor;
 
 
 const LOGO: [u64;26] = [
@@ -159,10 +162,42 @@ unsafe extern "C" fn print_c(mut s: *const cty::c_char) {
     print!(&buf[..seek]);
 }
 
+fn print_memmap(memmap: &MemoryMap) {
+    for entry in memmap.entries() {
+        print!(
+            "type: ", entry.type_.to_str(),
+            ", phys: ", entry.physical_start, " - ", (entry.physical_start as u128 + entry.num_pages as u128 * 4096 - 1),
+            ", pages: ", entry.num_pages,
+            ", attr: ", entry.attribute,
+            "\n"
+        );
+        
+    }
+}
+
+#[repr(align(16))]
+struct Stack ([u8;1024*1024]);
+
 #[no_mangle]
-pub extern "C" fn KernelMain(fb: FrameBufferRaw) -> ! {
+static mut kernel_main_stack: Stack = Stack([0u8;1024*1024]);
+
+#[no_mangle]
+#[allow(unreachable_code)]
+pub extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
+    unsafe { 
+        asm!("lea rsp, [kernel_main_stack + 1024 * 1024]");
+        KernelMain2(fb, mm);
+        asm!(
+            "   hlt",
+            "   jmp .fin"
+        );
+    }
+}
+
+#[no_mangle]
+pub extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
     unsafe {
-        GRAPHICS = transmute(MaybeUninit::new(Graphics::new(fb.into())));
+        GRAPHICS = transmute(MaybeUninit::new(Graphics::new((&*fb).into())));
         CONSOLE = transmute(MaybeUninit::new(Console::new(
             get_graphics(),
             (255,255,255),
@@ -183,6 +218,10 @@ pub extern "C" fn KernelMain(fb: FrameBufferRaw) -> ! {
         let graphics = get_graphics();
         graphics.fill_rect((0,0).into(), graphics.resolution().into(), (100,100,100));
         graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
+
+        let memmap: MemoryMap = (&*mm).into();
+        print_memmap(&memmap);
+        
         scan_pci_devices();
         set_idt_entry(
             IVIndex::XHCI, 

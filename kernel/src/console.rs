@@ -1,12 +1,12 @@
 use crate::{graphics::{PixelColor, Graphics}, font::{write_ascii, write_string}};
 
-const ROWS: usize = 25;
-const COLS: usize = 80;
+const ROWS: usize = 35;
+const COLS: usize = 100;
 pub struct Console<'a> {
     graphics: &'a mut Graphics<'a>,
     fg_color: PixelColor,
     bg_color: PixelColor,
-    buffer: [[u8;COLS+1];ROWS],
+    buffer: [[u8;COLS];ROWS],
     cursor_row: usize,
     cursor_col: usize
 }
@@ -14,7 +14,7 @@ pub struct Console<'a> {
 
 impl<'a> Console<'a> {
     pub fn new(graphics: &'a mut Graphics<'a>, fg_color: PixelColor, bg_color: PixelColor) -> Self {
-        Self { graphics, fg_color, bg_color, buffer: [[0;COLS+1];ROWS], cursor_row: 0, cursor_col: 0 }
+        Self { graphics, fg_color, bg_color, buffer: [[0;COLS];ROWS], cursor_row: 0, cursor_col: 0 }
     }
 
     fn scroll_up(&mut self) {
@@ -27,7 +27,7 @@ impl<'a> Console<'a> {
             self.buffer[row] = self.buffer[row+1];
             write_string(self.graphics, 0, row as u32 * 16, &self.buffer[row], self.fg_color);
         }
-        self.buffer[ROWS-1] = [0u8; COLS+1];
+        self.buffer[ROWS-1] = [0u8; COLS];
     }
 
     fn new_line(&mut self) {
@@ -45,10 +45,11 @@ impl<'a> Console<'a> {
             if *c as char == '\n' {
                 self.new_line();
             } else {
-                write_ascii(self.graphics, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
-                // FIXME: out of range
-                self.buffer[self.cursor_row][self.cursor_col] = *c;
-                self.cursor_col += 1;
+                if self.cursor_col < COLS {
+                    write_ascii(self.graphics, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
+                    self.buffer[self.cursor_row][self.cursor_col] = *c;
+                    self.cursor_col += 1;
+                }
             }
         }
     }

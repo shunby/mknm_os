@@ -12,6 +12,7 @@ mod mouse;
 mod interrupt;
 mod memory_map;
 mod segment;
+mod paging;
 
 use core::mem::{MaybeUninit, transmute};
 use core::panic::PanicInfo;
@@ -31,6 +32,7 @@ use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_d
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_map::MemoryDescriptor;
+use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
 
 
@@ -225,6 +227,7 @@ pub extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryM
         // print_memmap(&memmap);
         scan_pci_devices();
         setup_segments();
+        setup_identity_page_table();
         set_idt_entry(
             IVIndex::XHCI, 
             InterruptDescriptor::new(

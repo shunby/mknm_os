@@ -11,6 +11,7 @@ mod pci;
 mod mouse;
 mod interrupt;
 mod memory_map;
+mod segment;
 
 use core::mem::{MaybeUninit, transmute};
 use core::panic::PanicInfo;
@@ -30,6 +31,7 @@ use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_d
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_map::MemoryDescriptor;
+use crate::segment::setup_segments;
 
 
 const LOGO: [u64;26] = [
@@ -220,9 +222,9 @@ pub extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryM
         graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
 
         let memmap: MemoryMap = (&*mm).into();
-        print_memmap(&memmap);
-        
+        // print_memmap(&memmap);
         scan_pci_devices();
+        setup_segments();
         set_idt_entry(
             IVIndex::XHCI, 
             InterruptDescriptor::new(

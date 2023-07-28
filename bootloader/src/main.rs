@@ -7,13 +7,13 @@ mod memory_map;
 
 extern crate alloc;
 
-use core::{arch::asm, mem::{transmute}};
+use core::{arch::asm, mem::transmute};
 
 use frame_buffer::{FrameBufferConfig, PixelFormat};
 use memory_map::MemoryMapRaw;
-use uefi::{prelude::*, table::{boot::{AllocateType, MemoryType, SearchType, ScopedProtocol, OpenProtocolParams}}, proto::{console::gop::GraphicsOutput}, Result, data_types::PhysicalAddress};
+use uefi::{prelude::*, table::boot::{AllocateType, MemoryType, SearchType, ScopedProtocol, OpenProtocolParams}, proto::console::gop::GraphicsOutput, Result, data_types::PhysicalAddress};
 
-use crate::elf::{read_elf, Elf64_PhdrType, calc_load_address_range};
+use crate::elf::{ElfFile, Elf64_PhdrType};
 
 
 fn open_gop(boot_services: &BootServices, image_handle: Handle) -> Result<ScopedProtocol<GraphicsOutput>>{
@@ -52,15 +52,21 @@ fn get_memory_map(boot_services: &BootServices, buf: &mut [u8]) -> MemoryMapRaw{
     }
 }
 
+fn copy_slice_pad(to: &mut [u8], from: &[u8]) {
+    assert!(to.len() >= from.len());
+    to[..from.len()].copy_from_slice(from);
+    to[from.len()..].fill(0);
+}
+
 type EntryPointFn = extern "sysv64" fn(*const FrameBufferConfig, *const MemoryMapRaw);
-fn load_kernel(boot_services: &BootServices, image_handle: Handle) -> *const EntryPointFn {
+unsafe fn load_kernel(boot_services: &BootServices, image_handle: Handle) -> EntryPointFn {
     let mut fs = boot_services.get_image_file_system(image_handle).expect("failed to get file system");
     let kernel_file = fs.read(cstr16!("\\kernel.elf")).expect("failed to read '\\kernel.elf'");
     
-    let (ehdr, phdrs) = read_elf(&kernel_file);
-    let loads = phdrs.iter().filter(|h|h.p_type == Elf64_PhdrType::PT_LOAD);
+    let elf_file = ElfFile::from_buffer(&kernel_file);
+    let loads = elf_file.prog_headers.iter().filter(|h|h.p_type == Elf64_PhdrType::PT_LOAD);
     
-    let (first, last) = calc_load_address_range(phdrs);
+    let (first, last) = elf_file.calc_load_address_range();
     uefi_services::println!("Kernel: 0x{:0x} - 0x{:0x} ({} bytes)", first, last, last - first);
 
     boot_services.allocate_pages(
@@ -69,21 +75,17 @@ fn load_kernel(boot_services: &BootServices, image_handle: Handle) -> *const Ent
         ((last - first) as usize + 0xfff) / 0x1000
     ).expect("failed to allocate pages");
 
+    // copy LOAD sections from kernel file to memory
     for phdr in loads {
-        let (sec_begin, sec_end, sec_len) = (phdr.p_vaddr as usize, (phdr.p_vaddr + phdr.p_memsz) as usize, phdr.p_memsz as usize);
-        let buffer = unsafe {
-            core::slice::from_raw_parts_mut(sec_begin as *mut u8, sec_len)
-        };
-        
-        let (hdr_begin, hdr_end, hdr_len) = (phdr.p_offset as usize, (phdr.p_offset + phdr.p_filesz) as usize, phdr.p_filesz as usize);
-        buffer[..hdr_len].copy_from_slice(&kernel_file[hdr_begin..hdr_end]);
-        buffer[hdr_len..sec_len].fill(0);
-        uefi_services::println!("Loaded section: 0x{:0x} - 0x{:0x} ({} bytes)", sec_begin, sec_end, sec_len);
+        let buffer = core::slice::from_raw_parts_mut(phdr.inmem_range().0 as *mut u8, phdr.inmem_size() as usize);
+        let file = &kernel_file[phdr.infile_range().0 as usize .. phdr.infile_range().1 as usize];
+        copy_slice_pad(buffer, file);
+        uefi_services::println!("Loaded section: 0x{:0x} - 0x{:0x} ({} bytes)", phdr.inmem_range().0 , phdr.inmem_range().1, phdr.inmem_size());
     }
     
-    uefi_services::println!("Entry point: 0x{:0x}", ehdr.e_entry);
+    uefi_services::println!("Entry point: 0x{:0x}", elf_file.elf_header.e_entry);
 
-    ehdr.e_entry as *const EntryPointFn
+    unsafe { transmute(elf_file.elf_header.e_entry) }
 }
 
 fn construct_frame_buffer(boot_services: &BootServices) -> Result<FrameBufferConfig> {
@@ -103,15 +105,14 @@ fn construct_frame_buffer(boot_services: &BootServices) -> Result<FrameBufferCon
 }
 
 #[entry]
-fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
+unsafe fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     uefi_services::init(&mut system_table).unwrap();
 
     uefi_services::print!("Hello, Mikanami World!\n");
 
     let boot_services = system_table.boot_services();
 
-    let entry_addr = load_kernel(boot_services, image_handle);
-    let entry_point: EntryPointFn = unsafe {transmute(entry_addr)};
+    let entry_point = load_kernel(boot_services, image_handle);
     
     let frame_buffer_config = construct_frame_buffer(boot_services)
         .expect("failed to construct frame buffer config");

@@ -8,12 +8,13 @@ OBJS = newlib_support.o pure_virtual.o \
        usb/classdriver/mouse.o wrapper.o
 DEPENDS = $(join $(dir $(OBJS)),$(addprefix .,$(notdir $(OBJS:.o=.d))))
 
-BASEDIR = $(HOME)/osbook/devenv/x86_64-elf/
+BASEDIR = /app/x86_64-elf/
 LIBS = include/c++/v1 include include/freetype2
 
 CPPFLAGS += $(addprefix $(addprefix -I, $(BASEDIR)), $(LIBS))
-CPPFLAGS += -I$(BASEDIR) -I.\
-			-nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS \
+CPPFLAGS += -I. -I/app/x86_64-elf/include/c++/v1 -I/app/x86_64-elf/include -I/app/x86_64-elf/include/freetype2 \
+			-I/usr/include/c++/10 -I/usr/include/x86_64-linux-gnu/c++/10 -I/usr/include/c++/10/backward -I/usr/include\
+			-nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -D__GLIBC_USE\(...\)=0 \
 			-DEFIAPI='__attribute__((ms_abi))'
 CFLAGS   += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone -fno-inline-functions
 CXXFLAGS += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone -fno-inline-functions\

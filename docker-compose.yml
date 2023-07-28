@@ -1,0 +1,26 @@
+version: '2'
+services:
+  mknm-os:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app/workspace:cached
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    networks:
+      - x11
+  novnc:
+    build:
+      context: novnc
+      dockerfile: Dockerfile
+    depends_on:
+      - mknm-os
+    ports:
+      - "5090:5090"
+    networks:
+      - x11
+networks:
+  x11:

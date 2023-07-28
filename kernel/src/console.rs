@@ -44,12 +44,11 @@ impl<'a> Console<'a> {
         for c in str {
             if *c as char == '\n' {
                 self.new_line();
-            } else {
-                if self.cursor_col < COLS {
-                    write_ascii(self.graphics, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
-                    self.buffer[self.cursor_row][self.cursor_col] = *c;
-                    self.cursor_col += 1;
-                }
+            } else if self.cursor_col < COLS {
+                write_ascii(self.graphics, 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
+                self.buffer[self.cursor_row][self.cursor_col] = *c;
+                self.cursor_col += 1;
+                
             }
         }
     }

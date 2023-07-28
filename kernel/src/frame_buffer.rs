@@ -1,4 +1,4 @@
-use core::{slice::{from_raw_parts_mut}};
+use core::slice::from_raw_parts_mut;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

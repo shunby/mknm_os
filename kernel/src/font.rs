@@ -19,7 +19,7 @@ pub fn write_string(graphics: &mut Graphics, x: u32, y: u32, str: &[u8], color: 
 }
 
 pub fn u64_to_u8str(mut num: u64, buf: &mut [u8]) -> &mut [u8] {
-    assert!(buf.len() >= 1);
+    assert!(!buf.is_empty());
 
     let mut seek = buf.len() - 1;
     let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];

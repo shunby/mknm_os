@@ -2,7 +2,7 @@ use crate::graphics::{PixelColor, Vec2, Graphics};
 
 
 const MOUSE_CURSOR_DIMENSION: (usize, usize) = (15, 24);
-const MOUSE_CURSOR_SHAPE: [&'static str; MOUSE_CURSOR_DIMENSION.1] = [
+const MOUSE_CURSOR_SHAPE: [&str; MOUSE_CURSOR_DIMENSION.1] = [
     "@              ",
     "@@             ",
     "@.@            ",

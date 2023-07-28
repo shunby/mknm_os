@@ -1,4 +1,4 @@
-use core::{ops::Add};
+use core::ops::Add;
 
 use crate::frame_buffer::{PixelFormat, FrameBuffer};
 
@@ -61,7 +61,7 @@ impl<'a> Graphics<'a> {
                 if (pattern[dy] >> (63-dx)) & 1 == 1 {
                     self.fill_rect(
                         &pos + &Vec2::new(scale*dx as u32, scale * dy as u32),
-                        Vec2::new(scale as u32, scale as u32), 
+                        Vec2::new(scale, scale), 
                         c
                     );
                 }

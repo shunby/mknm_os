@@ -20,8 +20,8 @@ use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 
 use console::Console;
-use frame_buffer::{FrameBufferRaw};
-use graphics::{Vec2};
+use frame_buffer::FrameBufferRaw;
+use graphics::Vec2;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use memory_map::{MemoryMapRaw, MemoryMap};
 use mouse::MouseCursor;
@@ -31,7 +31,6 @@ use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_d
 
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
-use crate::memory_map::MemoryDescriptor;
 use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
 
@@ -187,7 +186,7 @@ static mut kernel_main_stack: Stack = Stack([0u8;1024*1024]);
 
 #[no_mangle]
 #[allow(unreachable_code)]
-pub extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
+pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
     unsafe { 
         asm!("lea rsp, [kernel_main_stack + 1024 * 1024]");
         KernelMain2(fb, mm);
@@ -199,7 +198,7 @@ pub extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const MemoryMa
 }
 
 #[no_mangle]
-pub extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
+pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
     unsafe {
         GRAPHICS = transmute(MaybeUninit::new(Graphics::new((&*fb).into())));
         CONSOLE = transmute(MaybeUninit::new(Console::new(
@@ -277,7 +276,7 @@ extern "x86-interrupt" fn interrupt_handler() {
     // print!("mouse move!\n");
     unsafe {
         let xhc = get_xhc();
-        while (&*xhc.PrimaryEventRing()).HasFront()  {
+        while (*xhc.PrimaryEventRing()).HasFront()  {
             let err = usb_xhci_ProcessEvent(xhc);
             if err.code_ != 0 {
                 print!("error while processevent: ", err.code_, "\n");
@@ -289,7 +288,7 @@ extern "x86-interrupt" fn interrupt_handler() {
 
 fn notify_end_of_interrupt() {
     unsafe {
-        let end_of_interrupt: *mut u32 = transmute(0xfee000b0u64);
+        let end_of_interrupt = 0xfee000b0u64 as *mut u32;
         write_volatile(end_of_interrupt, 0);
     }
 

@@ -71,10 +71,11 @@ pub struct MemoryDescriptor {
 
 impl MemoryDescriptor {
     pub fn is_available(&self) -> bool {
-        match self.type_ {
-            MemoryType::EfiBootServicesCode | MemoryType::EfiBootServicesData | MemoryType::EfiConventionalMemory => true,
-            _ => false
-        }
+        matches!(self.type_, 
+            MemoryType::EfiBootServicesCode | 
+            MemoryType::EfiBootServicesData | 
+            MemoryType::EfiConventionalMemory
+        )
     }
 }
 

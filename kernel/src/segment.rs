@@ -24,7 +24,7 @@ bitfield! {
 
 impl SegmentDescriptor {
     fn set_base(&mut self, base: u32) {
-        self.set_base_low(base as u16 & 0xffff);
+        self.set_base_low(base as u16);
         self.set_base_middle((base >> 16) as u16 & 0xff);
         self.set_base_high((base >> 24) as u16 & 0xff);
     }

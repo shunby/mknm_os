@@ -18,6 +18,7 @@ use core::mem::{MaybeUninit, transmute};
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
+use core::str::from_utf8;
 
 use console::Console;
 use frame_buffer::FrameBufferRaw;
@@ -94,12 +95,13 @@ fn scan_pci_devices() {
             let classcode = dev.read_class_code();
 
             let index = dev.get_index();
-            print!(
-                index.0, ".", index.1, ".", index.2, 
-                ": head ", dev.read_header_type(),
-                ", vend ", dev.read_vendor_id(),
-                ", class ", classcode.base, classcode.sub, classcode.interface , "\n"
-            );        
+            println!(
+                "{}.{}.{}: head {}, vend {}, class {} {} {}",
+                    index.0, index.1, index.2,
+                    dev.read_header_type(),
+                    dev.read_vendor_id(),
+                    classcode.base, classcode.sub, classcode.interface
+            ); 
         }
     }
 
@@ -134,9 +136,9 @@ fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
         let xhc_mmio_base = xhc_bar & !(0b1111 as u64);
         let mut xhc = usb_bindings::raw::usb_xhci_Controller::new(xhc_mmio_base as usize);
         let err = xhc.Initialize();
-        print!("xhc_mmio_base: ", xhc_mmio_base, "\n");
-        print!("xhc_bar: ", xhc_bar, "\n");
-        print!("initialize xhc: ", err.code_, "\n");
+        println!("xhc_mmio_base: {}", xhc_mmio_base);
+        println!("xhc_bar: {}", xhc_bar);
+        println!("initialize xhc: {}", err.code_);
         xhc.Run();
         print!("starting xhc\n");
 
@@ -146,7 +148,7 @@ fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
             if port.IsConnected() {
                 let err = usb_xhci_ConfigurePort(&mut xhc, &mut port);
                 if err.code_ != 0 {
-                    print!("failed to configure port: ", err.code_, "\n");
+                    println!("failed to configure port: {}", err.code_);
                 }
             }
         }
@@ -162,17 +164,17 @@ unsafe extern "C" fn print_c(mut s: *const cty::c_char) {
         s = s.offset(1);
         seek += 1;
     }
-    print!(&buf[..seek]);
+    print!("{}", from_utf8(&buf[..seek]).unwrap());
 }
 
 fn print_memmap(memmap: &MemoryMap) {
     for entry in memmap.entries() {
-        print!(
-            "type: ", entry.type_.to_str(),
-            ", phys: ", entry.physical_start, " - ", (entry.physical_start as u128 + entry.num_pages as u128 * 4096 - 1),
-            ", pages: ", entry.num_pages,
-            ", attr: ", entry.attribute,
-            "\n"
+        println!(
+            "type: {}, phys: {} - {}, pages: {}, attr: {}",
+            entry.type_.to_str(),
+            entry.physical_start, (entry.physical_start as u128 + entry.num_pages as u128 * 4096 - 1),
+            entry.num_pages, 
+            entry.attribute,
         );
         
     }
@@ -238,7 +240,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         load_idt();
         let xhc = find_xhc_device();
         let local_apic_id = *(0xfee00020 as *const u32) >> 24;
-        print!("apic_id: ", local_apic_id, "\n");
+        println!("apic_id: {}", local_apic_id);
         configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
     
         XHC = MaybeUninit::new(initialize_xhci_controller(&xhc));
@@ -256,7 +258,14 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     if let Some(loc) = _info.location() {
-        print!("panicked: ", loc.file().as_bytes(), ": ", loc.line());
+        print!("panicked: {}: {}", loc.file(), loc.line());
+    }
+    unsafe {
+        loop {
+            asm!("hlt");
+        }
+    }
+}
     }
     loop {}
 }
@@ -279,7 +288,7 @@ extern "x86-interrupt" fn interrupt_handler() {
         while (*xhc.PrimaryEventRing()).HasFront()  {
             let err = usb_xhci_ProcessEvent(xhc);
             if err.code_ != 0 {
-                print!("error while processevent: ", err.code_, "\n");
+                println!("error while processevent: {}", err.code_);
             }
         }
     }

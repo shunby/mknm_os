@@ -53,3 +53,10 @@ impl<'a> Console<'a> {
         }
     }
 }
+
+impl <'a> core::fmt::Write for Console<'a> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.put_string(s.as_bytes());
+        Ok(())
+    }
+}

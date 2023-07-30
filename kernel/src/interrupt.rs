@@ -74,8 +74,8 @@ static mut IDT: [MaybeUninit<InterruptDescriptor>; 256] = unsafe{MaybeUninit::un
 
 pub fn set_idt_entry(index: IVIndex, entry: InterruptDescriptor) {
     unsafe {
-        print!("IDT entry at ", &IDT[index as usize] as *const _ as u64, "\n");
-        print!("entry: ", transmute_copy::<_,u128>(&entry), "\n");
+        println!("IDT entry at {}", &IDT[index as usize] as *const _ as u64);
+        println!("entry: {}", transmute_copy::<_,u128>(&entry));
         IDT[index as usize] = MaybeUninit::new(entry);
     }
 }
@@ -84,7 +84,7 @@ pub fn load_idt() {
     unsafe {
         let limit = (size_of::<[MaybeUninit<InterruptDescriptor>; 256]>()-1) as u16;
         let offset = &IDT as *const _;
-        print!("load_idt: limit=", limit, ", offset=", offset as u64, "\n");
+        println!("load_idt: limit={}, offser={}", limit, offset as u64);
         _load_idt(limit, offset);
     }
 }

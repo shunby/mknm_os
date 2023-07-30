@@ -287,12 +287,12 @@ fn configure_msi_register(dev: &PCIDevice, cap_addr: u8, apic_id: u8, vector: u8
             if header.addr_64_capable() {cap_addr + 12} else {cap_addr + 8};
         let mut msg_data: MSIMessageData = transmute(dev.read_confreg(msg_data_addr));
         
-        print!("header: addr ", cap_addr, ", msi_enable", header.msi_enable() as u8, ", 64bit ", header.addr_64_capable() as u8, "\n");
-        print!("msg_addr: destination id ", msg_addr.destination_id() as u8, "\n");
-        print!("header: ", transmute_copy::<_,u32>(&header), "\n");
-        print!("msg_addr: ", transmute_copy::<_,u32>(&msg_addr), "\n");
-        print!("msg_data: addr ", msg_data_addr, ", ", transmute_copy::<_,u32>(&msg_data), "\n");
-        print!("----------------------------------------------------\n");
+        println!("header: addr {}, msi_enable {}, 64bit {}", cap_addr, header.msi_enable() as u8, header.addr_64_capable() as u8);
+        println!("msg_addr: destination id {}", msg_addr.destination_id() as u8);
+        println!("header: {}", transmute_copy::<_,u32>(&header));
+        println!("msg_addr: {}", transmute_copy::<_,u32>(&msg_addr));
+        println!("msg_data: addr {}, {}", msg_data_addr, transmute_copy::<_,u32>(&msg_data));
+        println!("----------------------------------------------------");
         header.set_msi_enable(true);
         msg_addr.set_destination_id(apic_id as u16);
         msg_addr.set_FEE(0xfee);
@@ -311,11 +311,11 @@ fn configure_msi_register(dev: &PCIDevice, cap_addr: u8, apic_id: u8, vector: u8
         let msg_addr: MSIMessageAddr = transmute(dev.read_confreg(cap_addr+4));
         let msg_data: MSIMessageData = transmute(dev.read_confreg(msg_data_addr));
         
-        print!("header: addr ", cap_addr, ", msi_enable", header.msi_enable() as u8, ", 64bit ", header.addr_64_capable() as u8, "\n");
-        print!("msg_addr: destination id ", msg_addr.destination_id() as u8, "\n");
-        print!("header: ", transmute_copy::<_,u32>(&header), "\n");
-        print!("msg_addr: ", transmute_copy::<_,u32>(&msg_addr), "\n");
-        print!("msg_data: ", transmute_copy::<_,u32>(&msg_data), "\n");
+        println!("header: addr {}, msi_enable {}, 64bit {}", cap_addr, header.msi_enable() as u8, header.addr_64_capable() as u8);
+        println!("msg_addr: destination id {}", msg_addr.destination_id() as u8);
+        println!("header: {}", transmute_copy::<_,u32>(&header));
+        println!("msg_addr: {}", transmute_copy::<_,u32>(&msg_addr));
+        println!("msg_data: {}", transmute_copy::<_,u32>(&msg_data));
     }
 }
 
@@ -326,8 +326,8 @@ pub fn configure_msi_fixed_destination(
         while cap_addr != 0 {
             let header: PCICapabilityHeader = transmute(dev.read_confreg(cap_addr));
             
-            print!("!header: addr ", cap_addr, ", cap_id: ", header.cap_id, "\n");
-            print!("!header: ", transmute_copy::<_,u32>(&header), "\n");
+            println!("!header: addr {}, cap_id: {}", cap_addr, header.cap_id);
+            println!("!header: {}", transmute_copy::<_,u32>(&header));
        
             if header.cap_id == PCICapabilityId::MSI as u8 {
                 configure_msi_register(dev, cap_addr, apic_id, vector);

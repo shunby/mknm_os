@@ -2,6 +2,19 @@ WORK_DIR=/app
 SRC_DIR=/app/workspace
 IMG_FILE=$WORK_DIR/disk2.img
 
+QEMU_ARGS="-monitor stdio"
+while getopts :d option 
+do
+    case $option in 
+        d)
+            QEMU_ARGS="-gdb tcp::12345 -S -daemonize"
+            ;;
+        *) 
+            echo "unexpected option"
+            exit 1;
+    esac
+done
+
 cd $SRC_DIR/kernel && cargo build
 cd $SRC_DIR/bootloader && cargo build
 
@@ -26,6 +39,6 @@ qemu-system-x86_64 \
     -drive if=ide,index=0,media=disk,format=raw,file=$IMG_FILE \
     -device nec-usb-xhci,id=xhci \
     -device usb-mouse -device usb-kbd \
-    -monitor stdio \
-    -vnc :0
+    -vnc :0 \
+    $QEMU_ARGS
 

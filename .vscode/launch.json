@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "name": "Attach",
+            "type": "lldb",
+            "request": "custom",
+            "targetCreateCommands": ["target create ${workspaceFolder}/kernel/kernel.elf"],
+            "processCreateCommands": ["gdb-remote localhost:12345", "breakpoint set --name KernelMain2", "continue"],
+            "preLaunchTask": "build_and_run"
+        }
+    ]
+}

@@ -1,4 +1,6 @@
-use crate::graphics::{PixelColor, Graphics};
+use x86_64::instructions::interrupts::without_interrupts;
+
+use crate::{graphics::{PixelColor, Graphics}, interrupt};
 
 pub fn write_ascii(graphics: &mut Graphics, x: u32, y: u32, c: char, color: PixelColor) {
     if c as usize >= FONTS.len() {return;}
@@ -125,7 +127,9 @@ macro_rules! print {
 
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    crate::get_console().write_fmt(args);
+    without_interrupts(|| {
+        crate::CONSOLE.lock().write_fmt(args).unwrap();
+    });
 }
 
 const FONTS: &[[u8;16]] = &[

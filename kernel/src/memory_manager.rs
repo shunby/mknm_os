@@ -179,6 +179,19 @@ impl<T> LazyInitVal<T> {
     }
 }
 
+impl <T> core::ops::Deref for LazyInitVal<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+impl <T> core::ops::DerefMut for LazyInitVal<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get_mut()   
+    }
+}
+
 pub struct LazyInit<T> {
     // in-placeに初期化したいので、Mutex<Option<T>>は使えない(おそらく)
     inner: Mutex<LazyInitVal<T>>,
@@ -308,7 +321,7 @@ impl ObjectAllocator {
         let mut pages: [MaybeUninit<&'static Mutex<PageHeader>>; ObjectAllocator::N_BLOCK_SIZES] =
             unsafe { MaybeUninit::uninit().assume_init() };
         for (i, size) in ObjectAllocator::BLOCK_SZ.iter().enumerate() {
-            let ptr = (MEM.lock().get_mut().allocate(1).unwrap() * BYTES_PER_FRAME) as *mut u8;
+            let ptr = (MEM.lock().allocate(1).unwrap() * BYTES_PER_FRAME) as *mut u8;
             let page = unsafe { PageHeader::new_at(ptr, *size) };
             pages[i] = MaybeUninit::new(page);
         }
@@ -346,11 +359,11 @@ impl ObjectAllocator {
 
 unsafe impl GlobalAlloc for LazyInit<ObjectAllocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.lock().get_mut().alloc(layout)
+        self.lock().alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.lock().get_mut().dealloc(ptr, layout);
+        self.lock().dealloc(ptr, layout);
     }
 }
 

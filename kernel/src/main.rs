@@ -17,7 +17,7 @@ mod segment;
 mod paging;
 
 use core::alloc::Layout;
-use core::mem::{MaybeUninit, transmute};
+use core::mem::transmute;
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
@@ -27,6 +27,7 @@ use console::Console;
 use frame_buffer::FrameBufferRaw;
 use graphics::Vec2;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
+use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
 use mouse::MouseCursor;
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
@@ -69,27 +70,10 @@ const LOGO: [u64;26] = [
     0b00000000000000000000001111110000000,
 ];
 
-// FIXME: not thread-safe or interruption-safe
-static mut CONSOLE: MaybeUninit<Console> = MaybeUninit::uninit();
-static mut MOUSE: MaybeUninit<MouseCursor> = MaybeUninit::uninit();
-static mut XHC: MaybeUninit<usb_xhci_Controller> = MaybeUninit::uninit();
-static mut GRAPHICS: MaybeUninit<Graphics> = MaybeUninit::uninit();
-
-fn get_console() -> &'static mut Console<'static> {
-    unsafe { CONSOLE.assume_init_mut() }
-}
-
-fn get_mouse() -> &'static mut MouseCursor<'static> {
-    unsafe { MOUSE.assume_init_mut() }
-}
-
-fn get_xhc() -> &'static mut usb_xhci_Controller {
-    unsafe { XHC.assume_init_mut() }
-}
-
-fn get_graphics() -> &'static mut Graphics<'static> {
-    unsafe { GRAPHICS.assume_init_mut() }
-}
+static CONSOLE: LazyInit<Console> = LazyInit::new();
+static MOUSE: LazyInit<MouseCursor> = LazyInit::new();
+static XHC: LazyInit<usb_xhci_Controller> = LazyInit::new();
+static GRAPHICS: LazyInit<Graphics> = LazyInit::new();
 
 fn scan_pci_devices() {
     let mut pci = PCIController::new();
@@ -131,7 +115,7 @@ fn find_xhc_device() -> PCIDevice {
 }
 
 unsafe extern "C" fn mouse_observer(x: i8, y: i8) {
-    get_mouse().move_relative(Vec2::new(x as i32, y as i32));
+    MOUSE.lock().move_relative(Vec2::new(x as i32, y as i32));
 }
 
 fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
@@ -206,17 +190,15 @@ pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const M
 #[no_mangle]
 pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
     unsafe {
-        GRAPHICS = transmute(MaybeUninit::new(Graphics::new((&*fb).into())));
-        CONSOLE = transmute(MaybeUninit::new(Console::new(
-            get_graphics(),
+        GRAPHICS.lock().init(Graphics::new((&*fb).into()));
+        CONSOLE.lock().init(Console::new(
             (255,255,255),
             (100,100,100)
-        )));
-        MOUSE = transmute(MaybeUninit::new(MouseCursor::new(
-            get_graphics(),
+        ));
+        MOUSE.lock().init(MouseCursor::new(
             (100,100,100),
             Vec2::new(200,300)
-        )));
+        ));
     }
     unsafe{
         usb_bindings::raw::SetLogLevel(1);
@@ -224,9 +206,12 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     }
     
     unsafe {
-        let graphics = get_graphics();
-        graphics.fill_rect((0,0).into(), graphics.resolution().into(), (100,100,100));
-        graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
+        {
+            let mut graphics = GRAPHICS.lock();
+            let resolution = graphics.resolution().into();
+            graphics.fill_rect((0,0).into(), resolution, (100,100,100));
+            graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
+        }
 
         let memmap: MemoryMap = (&*mm).into();
         // print_memmap(&memmap);
@@ -248,7 +233,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         println!("apic_id: {}", local_apic_id);
         configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
     
-        XHC = MaybeUninit::new(initialize_xhci_controller(&xhc));
+        XHC.lock().init(initialize_xhci_controller(&xhc));
         set_interrupt_flag(true);
     }
 
@@ -296,9 +281,9 @@ get_cs:
 extern "x86-interrupt" fn interrupt_handler() {
     // print!("mouse move!\n");
     unsafe {
-        let xhc = get_xhc();
+        let mut xhc = XHC.lock();
         while (*xhc.PrimaryEventRing()).HasFront()  {
-            let err = usb_xhci_ProcessEvent(xhc);
+            let err = usb_xhci_ProcessEvent(xhc.get_mut());
             if err.code_ != 0 {
                 println!("error while processevent: {}", err.code_);
             }
@@ -312,5 +297,4 @@ fn notify_end_of_interrupt() {
         let end_of_interrupt = 0xfee000b0u64 as *mut u32;
         write_volatile(end_of_interrupt, 0);
     }
-
 }

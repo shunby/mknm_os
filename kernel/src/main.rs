@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(alloc_error_handler)]
 
 mod frame_buffer;
 #[macro_use]
@@ -11,9 +12,11 @@ mod pci;
 mod mouse;
 mod interrupt;
 mod memory_map;
+mod memory_manager;
 mod segment;
 mod paging;
 
+use core::alloc::Layout;
 use core::mem::{MaybeUninit, transmute};
 use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
@@ -32,6 +35,7 @@ use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_d
 
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
+use crate::memory_manager::init_allocators;
 use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
 
@@ -229,6 +233,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         scan_pci_devices();
         setup_segments();
         setup_identity_page_table();
+        init_allocators(&memmap);
         set_idt_entry(
             IVIndex::XHCI, 
             InterruptDescriptor::new(
@@ -266,8 +271,15 @@ fn panic(_info: &PanicInfo) -> ! {
         }
     }
 }
+
+#[alloc_error_handler]
+fn oom(_: Layout) -> ! {
+    print!("out of memory.");
+    unsafe {
+        loop {
+            asm!("hlt");
+        }
     }
-    loop {}
 }
 
 extern "sysv64" {

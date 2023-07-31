@@ -34,6 +34,7 @@ use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
 use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_default_mouse_observer, usb_xhci_Controller};
 
+use crate::frame_buffer::FrameBuffer;
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
@@ -190,7 +191,7 @@ pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const M
 #[no_mangle]
 pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
     unsafe {
-        GRAPHICS.lock().init(Graphics::new((&*fb).into()));
+        GRAPHICS.lock().init(Graphics::new(FrameBuffer::new(fb)));
         CONSOLE.lock().init(Console::new(
             (255,255,255),
             (100,100,100)

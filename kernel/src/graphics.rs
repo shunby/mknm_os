@@ -27,13 +27,13 @@ fn write_rgb(fb: &mut FrameBuffer, pos: Vec2<u32>, color: PixelColor) {
     fb.frame_buffer[pixel_position+2] = color.2;
 }
 
-pub struct Graphics<'a> {
+pub struct Graphics {
     writer: fn(&mut FrameBuffer, Vec2<u32>, PixelColor),
-    fb: FrameBuffer<'a>
+    fb: FrameBuffer
 }
 
-impl<'a> Graphics<'a> {
-    pub fn new(fb: FrameBuffer<'a>) -> Self {
+impl Graphics {
+    pub fn new(fb: FrameBuffer) -> Self {
         Self {
             writer: match fb.pixel_format {
                 PixelFormat::PixelBGRResv8BitPerColor => write_bgr,

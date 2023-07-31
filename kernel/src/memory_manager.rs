@@ -191,7 +191,7 @@ impl<T> LazyInit<T> {
         }
     }
 
-    pub fn get(&self) -> MutexGuard<'_, SingleMutex, LazyInitVal<T>> {
+    pub fn lock(&self) -> MutexGuard<'_, SingleMutex, LazyInitVal<T>> {
         self.inner.lock()
     }
 }
@@ -308,7 +308,7 @@ impl ObjectAllocator {
         let mut pages: [MaybeUninit<&'static Mutex<PageHeader>>; ObjectAllocator::N_BLOCK_SIZES] =
             unsafe { MaybeUninit::uninit().assume_init() };
         for (i, size) in ObjectAllocator::BLOCK_SZ.iter().enumerate() {
-            let ptr = (MEM.get().get_mut().allocate(1).unwrap() * BYTES_PER_FRAME) as *mut u8;
+            let ptr = (MEM.lock().get_mut().allocate(1).unwrap() * BYTES_PER_FRAME) as *mut u8;
             let page = unsafe { PageHeader::new_at(ptr, *size) };
             pages[i] = MaybeUninit::new(page);
         }
@@ -346,11 +346,11 @@ impl ObjectAllocator {
 
 unsafe impl GlobalAlloc for LazyInit<ObjectAllocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.get().get_mut().alloc(layout)
+        self.lock().get_mut().alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.get().get_mut().dealloc(ptr, layout);
+        self.lock().get_mut().dealloc(ptr, layout);
     }
 }
 
@@ -364,9 +364,9 @@ pub fn init_allocators(map: &MemoryMap) {
         let mem_init = |inner: &mut MaybeUninit<BitMapMemoryManager>| {
             BitMapMemoryManager::new_at(inner.as_mut_ptr() as *mut u8, map)
         };
-        MEM.get().init_inplace(&mem_init);
+        MEM.lock().init_inplace(&mem_init);
     }
-    GLOBAL_ALLOCATOR.get().init(ObjectAllocator::new());
+    GLOBAL_ALLOCATOR.lock().init(ObjectAllocator::new());
     run_allocator_tests();
 }
 

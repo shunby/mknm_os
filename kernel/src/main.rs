@@ -201,6 +201,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     initialize_lapic_timer();
 
     let fb = FrameBuffer::from_raw(fb);
+    let (display_width, display_height) = fb.resolution();
     set_default_pixel_format(fb.pixel_format());
     LAYERS.lock().init(LayeredWindowManager::new(fb));
     let (mouse_window_id, console_window_id) = {
@@ -247,10 +248,12 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         start_lapic_timer();
         {
             let mut layers = LAYERS.lock();
-            layers.move_relative(mouse_window_id, (dx as i32, dy as i32).into());
+            let window = layers.get_layer_mut(mouse_window_id);
+            let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
+            window.move_to(new_pos);
             layers.draw();
         }
-        println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
+        println!("MouseObserver: elapsed = {}, cursor={:?}", lapic_timer_elapsed(), pos);
         stop_lapic_timer();
     }));
     set_interrupt_flag(true);

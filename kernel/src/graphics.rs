@@ -41,6 +41,12 @@ impl<T> Vec2<T> {
     }
 }
 
+impl<T: Ord+Copy> Vec2<T>{
+    pub fn clamp(&self, min: Self, max: Self) -> Self {
+        Self { x: self.x.max(min.x).min(max.x), y: self.y.max(min.y).min(max.y) }
+    }
+}
+
 impl<T> Add<&Vec2<T>> for &Vec2<T> where for<'a, 'b> &'a T: Add<&'b T, Output = T>{
     type Output = Vec2<T>;
     fn add(self, rhs: &Vec2<T>) -> Self::Output {

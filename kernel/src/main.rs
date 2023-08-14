@@ -244,14 +244,14 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
 
     XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
-        // start_lapic_timer();
+        start_lapic_timer();
         {
             let mut layers = LAYERS.lock();
             layers.move_relative(mouse_window_id, (dx as i32, dy as i32).into());
             layers.draw();
         }
-        // println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
-        // stop_lapic_timer();
+        println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
+        stop_lapic_timer();
     }));
     set_interrupt_flag(true);
     

@@ -103,6 +103,10 @@ impl Rect {
         }
     }
 
+    pub fn contained_by(&self, other: &Self) -> bool {
+        other.x1 <= self.x1 && other.y1 <= self.y1 && self.x2 <= other.x2 && self.y2 <= other.y2
+    }
+
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let x1 = self.x1.max(other.x1);
         let x2 = self.x2.min(other.x2);

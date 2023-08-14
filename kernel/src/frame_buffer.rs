@@ -168,6 +168,37 @@ impl FrameBuffer {
             buf_to[xs_to.0..xs_to.1].copy_from_slice(&buf_from[xs_from.0..xs_from.1]);
         }
     }
+
+    pub fn move_rect(&mut self, to: Vec2<i32>, rect: Rect) {
+        assert!(rect.contained_by(&Rect::from_wh(0, 0, self.conf.horizontal_resolution as i32, self.conf.vertical_resolution as i32)));
+        let buf = self.data.get_mut();
+
+        if to.y <= rect.y1 {
+            for y in 0..(rect.y2 - rect.y1) {
+                let xs_from = (
+                    self.conf.to_index(rect.x1, y+rect.y1),
+                    self.conf.to_index(rect.x2, y+rect.y1)
+                );
+                let xs_to = (
+                    self.conf.to_index(to.x, y+to.y),
+                    self.conf.to_index(to.x + rect.x2 - rect.x1, y + to.y)
+                );
+                buf.copy_within(xs_from.0..xs_from.1, xs_to.0);
+            }
+        } else {
+            for y in (0..(rect.y2 - rect.y1)).rev() {
+                let xs_from = (
+                    self.conf.to_index(rect.x1, y+rect.y1),
+                    self.conf.to_index(rect.x2, y+rect.y1)
+                );
+                let xs_to = (
+                    self.conf.to_index(to.x, y+to.y),
+                    self.conf.to_index(to.x + rect.x2 - rect.x1, y + to.y)
+                );
+                buf.copy_within(xs_from.0..xs_from.1, xs_to.0);
+            }
+        }
+    }
 }
 
 impl PixelWriter for FrameBuffer {

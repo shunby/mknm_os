@@ -76,6 +76,10 @@ impl Window {
         self.pos = self.pos + pos_diff;
         self
     }
+
+    pub fn move_rect(&mut self, to: Vec2<i32>, rect: Rect) {
+        self.shadow.move_rect(to, rect);
+    }
 }
 
 impl PixelWriter for Window {

@@ -303,6 +303,14 @@ impl PageHeader {
 
         page
     }
+
+    pub unsafe fn extend(&mut self, page: *mut u8) {
+        let mut ptr = page as usize + BYTES_PER_FRAME - self.obj_sz;
+        while ptr >= page as usize {
+            self.free_list.push_front(ptr as *mut u8);
+            ptr -= self.obj_sz;
+        }
+    }
 }
 
 #[repr(C)]
@@ -331,6 +339,13 @@ impl ObjectAllocator {
     }
 
     pub fn alloc(&mut self, layout: Layout) -> *mut u8 {
+        if layout.size() > 2048 {
+            return match MEM.lock().allocate((layout.size() + BYTES_PER_FRAME - 1) / BYTES_PER_FRAME) {
+                Some(id) => (id * BYTES_PER_FRAME) as *mut u8,
+                None => null_mut()
+            };
+        }
+
         let size = ObjectAllocator::BLOCK_SZ
             .iter()
             .enumerate()
@@ -342,10 +357,27 @@ impl ObjectAllocator {
         let mut page = self.pages[index].lock();
 
         let is_aligned_fn = |ptr| ptr as usize % layout.align() == 0;
-        page.free_list.pop_filter(&is_aligned_fn)
+        let addr = page.free_list.pop_filter(&is_aligned_fn);
+        if addr.is_null() {
+            unsafe {
+                let addr = match MEM.lock().allocate(1) {
+                    None => {return null_mut();},
+                    Some(p) => (p * BYTES_PER_FRAME) as *mut u8
+                };
+                page.extend(addr);
+            }
+            page.free_list.pop_filter(&is_aligned_fn)
+        } else {
+            addr
+        }
     }
 
     pub unsafe fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
+        if layout.size() > 2048 {
+            MEM.lock().free(ptr as usize / BYTES_PER_FRAME, (layout.size() + BYTES_PER_FRAME - 1) / BYTES_PER_FRAME);
+            return;
+        }
+        
         let (index, _) = ObjectAllocator::BLOCK_SZ
             .iter()
             .enumerate()
@@ -419,5 +451,5 @@ pub fn run_allocator_tests() {
             // println!("ok: size = {size}, align = {align}");
         }
     }
-    println!("run_allocator_tests: finished");
+    // println!("run_allocator_tests: finished");
 }

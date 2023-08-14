@@ -17,6 +17,7 @@ mod segment;
 mod paging;
 mod window;
 mod xhci;
+mod timer;
 
 #[macro_use]
 extern crate alloc;
@@ -47,6 +48,7 @@ use crate::memory_manager::init_allocators;
 use crate::mouse::draw_cursor;
 use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
+use crate::timer::{start_lapic_timer, lapic_timer_elapsed, stop_lapic_timer, initialize_lapic_timer};
 use crate::window::Window;
 use crate::xhci::set_default_mouse_observer;
 
@@ -198,6 +200,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     setup_segments();
     setup_identity_page_table();
     init_allocators(&memmap);
+    initialize_lapic_timer();
 
     let fb = FrameBuffer::new(fb);
     LAYERS.lock().init(LayeredWindowManager::new(Box::new(Graphics::new(fb))));
@@ -221,34 +224,38 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         (100,100,100)
     ));
     
-    unsafe {
-        usb_bindings::raw::SetLogLevel(1);
-        usb_bindings::raw::SetPrintFn(Some(print_c));
+    usb_bindings::raw::SetLogLevel(1);
+    usb_bindings::raw::SetPrintFn(Some(print_c));
 
-        // print_memmap(&memmap);
-        scan_pci_devices();
-        set_idt_entry(
-            IVIndex::XHCI, 
-            InterruptDescriptor::new(
-                get_cs(), 
-                InterruptDescriptorAttribute::new(0, DescriptorType::InterruptGate), 
-                transmute(interrupt_handler as *const fn())
-            )
-        );
-        load_idt();
+    // print_memmap(&memmap);
+    scan_pci_devices();
+    set_idt_entry(
+        IVIndex::XHCI, 
+        InterruptDescriptor::new(
+            get_cs(), 
+            InterruptDescriptorAttribute::new(0, DescriptorType::InterruptGate), 
+            transmute(interrupt_handler as *const fn())
+        )
+    );
+    load_idt();
 
-        let xhc = find_xhc_device();
-        let local_apic_id = *(0xfee00020 as *const u32) >> 24;
-        println!("apic_id: {}", local_apic_id);
-        configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
-    
-        XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
+    let xhc = find_xhc_device();
+    let local_apic_id = *(0xfee00020 as *const u32) >> 24;
+    println!("apic_id: {}", local_apic_id);
+    configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
+
+    XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
+        start_lapic_timer();
+        {
             let mut layers = LAYERS.lock();
             layers.move_relative(mouse_window_id, (dx as i32, dy as i32).into());
             layers.draw();
-        }));
-        set_interrupt_flag(true);
-    }
+        }
+        println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
+        stop_lapic_timer();
+    }));
+    set_interrupt_flag(true);
+    
     LAYERS.lock().draw();
     print!("finish\n");
     unsafe {

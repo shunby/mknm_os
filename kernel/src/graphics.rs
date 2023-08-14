@@ -1,9 +1,5 @@
 use core::ops::Add;
 
-use alloc::boxed::Box;
-
-use crate::frame_buffer::{PixelFormat, FrameBuffer};
-
 pub type PixelColor = (u8,u8,u8);
 
 pub trait PixelWriter {
@@ -32,58 +28,6 @@ pub trait PixelWriter {
     }
 }
 
-fn write_bgr(fb: &mut FrameBuffer, pos: Vec2<i32>, color: PixelColor) {
-    let (x,y) = (pos.x, pos.y);
-    if x >= fb.horizontal_resolution as i32 || x < 0 || y >= fb.vertical_resolution as i32 || y < 0 {return;}
-    
-    let pixel_position = ((fb.pixels_per_scanline as i32 * y + x) * 4) as usize;
-    
-    fb.frame_buffer[pixel_position] = color.2;
-    fb.frame_buffer[pixel_position+1] = color.1;
-    fb.frame_buffer[pixel_position+2] = color.0;
-}
-
-fn write_rgb(fb: &mut FrameBuffer, pos: Vec2<i32>, color: PixelColor) {
-    let (x,y) = (pos.x, pos.y);
-    if x >= fb.horizontal_resolution as i32 || x < 0 || y >= fb.vertical_resolution as i32 || y < 0 {return;}
-    
-    let pixel_position = ((fb.pixels_per_scanline as i32 * y + x) * 4) as usize;
-    
-    fb.frame_buffer[pixel_position] = color.0;
-    fb.frame_buffer[pixel_position+1] = color.1;
-    fb.frame_buffer[pixel_position+2] = color.2;
-}
-
-pub struct Graphics {
-    writer: fn(&mut FrameBuffer, Vec2<i32>, PixelColor),
-    fb: FrameBuffer
-}
-
-impl PixelWriter for Graphics {
-    fn write(&mut self, pos: Vec2<i32>, color: PixelColor) {
-        (self.writer)(&mut self.fb, pos, color);
-    }
-}
-
-impl Graphics {
-    pub fn new(fb: FrameBuffer) -> Self {
-        Self {
-            writer: match fb.pixel_format {
-                PixelFormat::PixelBGRResv8BitPerColor => write_bgr,
-                PixelFormat::PixelRGBResv8BitPerColor => write_rgb
-            }, 
-            fb
-        }
-    }
-
-    pub fn pixels_per_scanline(&self) -> u32 {
-        self.fb.pixels_per_scanline
-    }
-
-    pub fn resolution(&self) -> (u32, u32) {
-        (self.fb.horizontal_resolution, self.fb.vertical_resolution)
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Vec2<T>{
@@ -121,5 +65,55 @@ impl<T> Add<Vec2<T>> for Vec2<T> where T: Add<T, Output = T>{
 impl<T> From<(T,T)> for Vec2<T> {
     fn from(value: (T,T)) -> Self {
         Vec2 { x: value.0, y: value.1 }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Rect{
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32
+}
+
+impl Rect {
+    pub fn from_points(x1: i32, y1: i32, x2: i32, y2: i32) -> Self {
+        Self {x1, y1, x2, y2}
+    }
+
+    pub fn from_wh(x1: i32, y1: i32, w: i32, h: i32) -> Self {
+        Self {x1, y1, x2: x1+w, y2: y1+h}
+    }
+
+    pub fn to_origin(&self) -> Self {
+        Self {
+            x1: 0,
+            y1: 0,
+            x2: self.x2 - self.x1,
+            y2: self.y2 - self.y1
+        }
+    }
+
+    pub fn move_relative(&self, dx: i32, dy: i32) -> Self {
+        Self {
+            x1: self.x1 + dx,
+            x2: self.x2 + dx,
+            y1: self.y1 + dy,
+            y2: self.y2 + dy,
+        }
+    }
+
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        let x1 = self.x1.max(other.x1);
+        let x2 = self.x2.min(other.x2);
+        if x1 >= x2 {return None;}
+
+        let y1 = self.y1.max(other.y1);
+        let y2 = self.y2.min(other.y2);
+        if y1 >= y2 {return None;}
+
+        Some(Self {
+            x1, x2, y1, y2
+        })
     }
 }

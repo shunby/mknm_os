@@ -1,8 +1,8 @@
 use core::iter::repeat_with;
 
-use alloc::{vec::Vec, boxed::Box};
+use alloc::vec::Vec;
 
-use crate::graphics::{PixelColor, Vec2, PixelWriter};
+use crate::{graphics::{PixelColor, Vec2, PixelWriter, Rect}, frame_buffer::FrameBuffer};
 
 pub struct Window {
     pos: Vec2<i32>,
@@ -10,6 +10,7 @@ pub struct Window {
     height: usize,
     data: Vec<Vec<PixelColor>>,
     transparant_color: Option<PixelColor>,
+    shadow: FrameBuffer
 }
 
 impl Window {
@@ -22,6 +23,7 @@ impl Window {
                 .take(height)
                 .collect(),
             transparant_color: None,
+            shadow: FrameBuffer::new(width, height)
         }
     }
 
@@ -40,20 +42,24 @@ impl Window {
         0 <= pos.x && pos.x < self.width as i32 && 0 <= pos.y && pos.y < self.height as i32
     }
 
-    pub fn draw_to(&self, writer: &mut Box<dyn PixelWriter>) {
+    pub fn draw_to(&self, buf: &mut FrameBuffer) {
         match self.transparant_color {
             None => {
-                for (y, col) in self.data.iter().enumerate() {
-                    for (x, pixel) in col.iter().enumerate() {
-                        writer.write(&self.pos + &(x as i32, y as i32).into(), *pixel);
-                    }
-                }
+                buf.copy(self.pos, &self.shadow);
             }
             Some(tc) => {
-                for (y, col) in self.data.iter().enumerate() {
-                    for (x, pixel) in col.iter().enumerate() {
+                let r_window = Rect::from_wh(self.pos.x, self.pos.y, self.width as i32, self.height as i32);
+                let r_fb = Rect::from_wh(0,0,buf.resolution().0 as i32, buf.resolution().1 as i32);
+                let r_draw = match r_fb.intersection(&r_window).map(|r|r.move_relative(-self.pos.x, -self.pos.y)) {
+                    None => return,
+                    Some(r) => r
+                }; 
+
+                for y in r_draw.y1 as usize..r_draw.y2 as usize {
+                    for x in r_draw.x1 as usize..r_draw.x2 as usize {
+                        let pixel = &self.data[y][x];
                         if *pixel != tc {
-                            writer.write(&self.pos + &(x as i32, y as i32).into(), *pixel);
+                            buf.write(self.pos + (x as i32, y as i32).into(), *pixel);
                         }
                     }
                 }
@@ -76,6 +82,7 @@ impl PixelWriter for Window {
     fn write(&mut self, pos: Vec2<i32>, c: PixelColor) {
         if self.is_inside(pos) {
             *self.get_mut_at(pos) = c;
+            self.shadow.write(pos, c);
         }
     }
 }
@@ -85,15 +92,15 @@ pub type LayerId = usize;
 pub struct LayeredWindowManager {
     layers: Vec<Window>,
     layer_stack: Vec<LayerId>,
-    writer: Box<dyn PixelWriter>,
+    buffer: FrameBuffer
 }
 
 impl LayeredWindowManager {
-    pub fn new(writer: Box<dyn PixelWriter>) -> Self {
+    pub fn new(buffer: FrameBuffer) -> Self {
         Self {
             layers: Vec::new(),
             layer_stack: Vec::new(),
-            writer
+            buffer
         }
     }
 
@@ -120,7 +127,7 @@ impl LayeredWindowManager {
 
     pub fn draw(&mut self) {
         for id in &self.layer_stack {
-            self.layers[*id].draw_to(&mut self.writer);
+            self.layers[*id].draw_to(&mut self.buffer);
         }
     }
 

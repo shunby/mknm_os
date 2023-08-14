@@ -29,10 +29,9 @@ use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 use core::str::from_utf8;
 
-use alloc::boxed::Box;
 use console::Console;
 use frame_buffer::FrameBufferRaw;
-use graphics::{Vec2, PixelWriter};
+use graphics::PixelWriter;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
@@ -41,8 +40,7 @@ use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_xhci_Controller};
 use window::LayeredWindowManager;
 
-use crate::frame_buffer::FrameBuffer;
-use crate::graphics::Graphics;
+use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
 use crate::mouse::draw_cursor;
@@ -202,8 +200,9 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     init_allocators(&memmap);
     initialize_lapic_timer();
 
-    let fb = FrameBuffer::new(fb);
-    LAYERS.lock().init(LayeredWindowManager::new(Box::new(Graphics::new(fb))));
+    let fb = FrameBuffer::from_raw(fb);
+    set_default_pixel_format(fb.pixel_format());
+    LAYERS.lock().init(LayeredWindowManager::new(fb));
     let (mouse_window_id, console_window_id) = {
         let mut layer_mgr = LAYERS.lock();
     
@@ -245,14 +244,14 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
 
     XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
-        start_lapic_timer();
+        // start_lapic_timer();
         {
             let mut layers = LAYERS.lock();
             layers.move_relative(mouse_window_id, (dx as i32, dy as i32).into());
             layers.draw();
         }
-        println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
-        stop_lapic_timer();
+        // println!("MouseObserver: elapsed = {}", lapic_timer_elapsed());
+        // stop_lapic_timer();
     }));
     set_interrupt_flag(true);
     

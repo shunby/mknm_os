@@ -1,8 +1,9 @@
-use crate::{graphics::PixelColor, font::{write_ascii, write_string}, GRAPHICS};
+use crate::{graphics::PixelColor, font::{write_ascii, write_string}, PixelWriter, LAYERS, window::LayerId};
 
 const ROWS: usize = 35;
 const COLS: usize = 100;
 pub struct Console {
+    layer_id: LayerId,
     fg_color: PixelColor,
     bg_color: PixelColor,
     buffer: [[u8;COLS];ROWS],
@@ -10,22 +11,22 @@ pub struct Console {
     cursor_col: usize
 }
 
-
 impl Console {
-    pub fn new(fg_color: PixelColor, bg_color: PixelColor) -> Self {
-        Self { fg_color, bg_color, buffer: [[0;COLS];ROWS], cursor_row: 0, cursor_col: 0 }
+    pub fn new(layer_id: LayerId, fg_color: PixelColor, bg_color: PixelColor) -> Self {
+        Self { layer_id, fg_color, bg_color, buffer: [[0;COLS];ROWS], cursor_row: 0, cursor_col: 0 }
     }
 
     fn scroll_up(&mut self) {
-        let mut graphics = GRAPHICS.lock();
+        let mut layers = LAYERS.lock();
+        let graphics = layers.get_layer_mut(self.layer_id);
         for y in 0..16 * ROWS {
             for x in 0..8 * COLS {
-                graphics.write_pixel((x as u32, y as u32).into(), self.bg_color);
+                graphics.write((x as i32, y as i32).into(), self.bg_color);
             }
         }
         for row in 0..ROWS-1 {
             self.buffer[row] = self.buffer[row+1];
-            write_string(&mut graphics, 0, row as u32 * 16, &self.buffer[row], self.fg_color);
+            write_string(graphics, 0, row as u32 * 16, &self.buffer[row], self.fg_color);
         }
         self.buffer[ROWS-1] = [0u8; COLS];
     }
@@ -45,7 +46,7 @@ impl Console {
             if *c as char == '\n' {
                 self.new_line();
             } else if self.cursor_col < COLS {
-                write_ascii(GRAPHICS.lock().get_mut(), 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
+                write_ascii(LAYERS.lock().get_layer_mut(self.layer_id), 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
                 self.buffer[self.cursor_row][self.cursor_col] = *c;
                 self.cursor_col += 1;
                 

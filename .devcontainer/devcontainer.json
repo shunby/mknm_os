@@ -19,12 +19,13 @@
         },
         
         "extensions": [
-          "vadimcn.vscode-lldb",
-          "mutantdino.resourcemonitor",
-          "rust-lang.rust-analyzer",
-          "tamasfe.even-better-toml",
-          "serayuzgur.crates"
-        ]
+			"vadimcn.vscode-lldb",
+			"mutantdino.resourcemonitor",
+			"rust-lang.rust-analyzer",
+			"tamasfe.even-better-toml",
+			"serayuzgur.crates",
+			"ms-vscode.cpptools-extension-pack"
+		]
 		}
 	},
   

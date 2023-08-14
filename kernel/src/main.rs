@@ -15,6 +15,11 @@ mod memory_map;
 mod memory_manager;
 mod segment;
 mod paging;
+mod window;
+mod xhci;
+
+#[macro_use]
+extern crate alloc;
 
 use core::alloc::Layout;
 use core::mem::transmute;
@@ -23,23 +28,27 @@ use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 use core::str::from_utf8;
 
+use alloc::boxed::Box;
 use console::Console;
 use frame_buffer::FrameBufferRaw;
-use graphics::Vec2;
+use graphics::{Vec2, PixelWriter};
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
-use mouse::MouseCursor;
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
-use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_set_default_mouse_observer, usb_xhci_Controller};
+use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_xhci_Controller};
+use window::LayeredWindowManager;
 
 use crate::frame_buffer::FrameBuffer;
 use crate::graphics::Graphics;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
+use crate::mouse::draw_cursor;
 use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
+use crate::window::Window;
+use crate::xhci::set_default_mouse_observer;
 
 
 const LOGO: [u64;26] = [
@@ -72,9 +81,8 @@ const LOGO: [u64;26] = [
 ];
 
 static CONSOLE: LazyInit<Console> = LazyInit::new();
-static MOUSE: LazyInit<MouseCursor> = LazyInit::new();
 static XHC: LazyInit<usb_xhci_Controller> = LazyInit::new();
-static GRAPHICS: LazyInit<Graphics> = LazyInit::new();
+static LAYERS: LazyInit<LayeredWindowManager> = LazyInit::new();
 
 fn scan_pci_devices() {
     let mut pci = PCIController::new();
@@ -115,11 +123,7 @@ fn find_xhc_device() -> PCIDevice {
     }
 }
 
-unsafe extern "C" fn mouse_observer(x: i8, y: i8) {
-    MOUSE.lock().move_relative(Vec2::new(x as i32, y as i32));
-}
-
-fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
+fn initialize_xhci_controller(xhc: &PCIDevice, mouse_observer: impl Fn(i8, i8) + 'static) -> usb_xhci_Controller {
     unsafe {
         let xhc_bar = xhc.read_bar(0);
         let xhc_mmio_base = xhc_bar & !(0b1111 as u64);
@@ -131,7 +135,7 @@ fn initialize_xhci_controller(xhc: &PCIDevice) -> usb_xhci_Controller {
         xhc.Run();
         print!("starting xhc\n");
 
-        usb_set_default_mouse_observer(Some(mouse_observer));
+        set_default_mouse_observer(mouse_observer);
         for i in 1..=xhc.max_ports_ {
             let mut port = xhc.PortAt(i);
             if port.IsConnected() {
@@ -190,36 +194,39 @@ pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const M
 
 #[no_mangle]
 pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw) -> ! {
-    unsafe {
-        GRAPHICS.lock().init(Graphics::new(FrameBuffer::new(fb)));
-        CONSOLE.lock().init(Console::new(
-            (255,255,255),
-            (100,100,100)
-        ));
-        MOUSE.lock().init(MouseCursor::new(
-            (100,100,100),
-            Vec2::new(200,300)
-        ));
-    }
-    unsafe{
-        usb_bindings::raw::SetLogLevel(1);
-        usb_bindings::raw::SetPrintFn(Some(print_c));
-    }
+    let memmap: MemoryMap = (&*mm).into();
+    setup_segments();
+    setup_identity_page_table();
+    init_allocators(&memmap);
+
+    let fb = FrameBuffer::new(fb);
+    LAYERS.lock().init(LayeredWindowManager::new(Box::new(Graphics::new(fb))));
+    let (mouse_window_id, console_window_id) = {
+        let mut layer_mgr = LAYERS.lock();
+    
+        let mut mouse_window = Window::new(15, 24);
+        mouse_window.set_transparent_color(Some((1,1,1)));
+        draw_cursor(&mut mouse_window);
+        let mouse_window_id = layer_mgr.new_layer(mouse_window);
+    
+        let console_window = Window::new(640, 480);
+        let console_window_id = layer_mgr.new_layer(console_window);
+        layer_mgr.up_down(console_window_id, 0);
+        layer_mgr.up_down(mouse_window_id, 1);
+        (mouse_window_id, console_window_id)
+    };
+    CONSOLE.lock().init(Console::new(  
+        console_window_id,
+        (255,255,255),
+        (100,100,100)
+    ));
     
     unsafe {
-        {
-            let mut graphics = GRAPHICS.lock();
-            let resolution = graphics.resolution().into();
-            graphics.fill_rect((0,0).into(), resolution, (100,100,100));
-            graphics.draw_bitpattern((100u32,100u32).into(), &LOGO, (0,0,255), 5);
-        }
+        usb_bindings::raw::SetLogLevel(1);
+        usb_bindings::raw::SetPrintFn(Some(print_c));
 
-        let memmap: MemoryMap = (&*mm).into();
         // print_memmap(&memmap);
         scan_pci_devices();
-        setup_segments();
-        setup_identity_page_table();
-        init_allocators(&memmap);
         set_idt_entry(
             IVIndex::XHCI, 
             InterruptDescriptor::new(
@@ -229,15 +236,20 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             )
         );
         load_idt();
+
         let xhc = find_xhc_device();
         let local_apic_id = *(0xfee00020 as *const u32) >> 24;
         println!("apic_id: {}", local_apic_id);
         configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
     
-        XHC.lock().init(initialize_xhci_controller(&xhc));
+        XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
+            let mut layers = LAYERS.lock();
+            layers.move_relative(mouse_window_id, (dx as i32, dy as i32).into());
+            layers.draw();
+        }));
         set_interrupt_flag(true);
     }
-
+    LAYERS.lock().draw();
     print!("finish\n");
     unsafe {
         loop {

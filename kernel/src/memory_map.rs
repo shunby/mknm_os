@@ -10,7 +10,6 @@ pub struct MemoryMapRaw {
 
 impl<'a> Into<MemoryMap<'a>> for &'a MemoryMapRaw {
     fn into(self) -> MemoryMap<'a> {
-        println!("map_size: {}", self.map_size);
         unsafe {
             MemoryMap {
                 buffer: &*slice_from_raw_parts(self.buffer, self.map_size as usize),

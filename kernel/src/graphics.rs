@@ -1,26 +1,53 @@
 use core::ops::Add;
 
+use alloc::boxed::Box;
+
 use crate::frame_buffer::{PixelFormat, FrameBuffer};
 
 pub type PixelColor = (u8,u8,u8);
 
+pub trait PixelWriter {
+    fn write(&mut self, pos: Vec2<i32>, color: PixelColor);
 
-fn write_bgr(fb: &mut FrameBuffer, pos: Vec2<u32>, color: PixelColor) {
+    fn fill_rect(&mut self, pos: Vec2<i32>, size: Vec2<u32>, c: PixelColor) {
+        for x in pos.x..pos.x + size.x as i32 {
+            for y in pos.y..pos.y + size.y as i32 {
+                self.write(&pos + &Vec2::new(x,y), c);
+            }
+        }
+    }
+
+    fn draw_bitpattern(&mut self, pos: Vec2<i32>, pattern: &[u64], c: PixelColor, scale: u32) {
+        for dy in 0..pattern.len() {
+            for dx in 0usize..64 {
+                if (pattern[dy] >> (63-dx)) & 1 == 1 {
+                    self.fill_rect(
+                        &pos + &Vec2::new((scale*dx as u32) as i32, (scale * dy as u32) as i32),
+                        Vec2::new(scale, scale), 
+                        c
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn write_bgr(fb: &mut FrameBuffer, pos: Vec2<i32>, color: PixelColor) {
     let (x,y) = (pos.x, pos.y);
-    if x >= fb.horizontal_resolution || y >= fb.vertical_resolution {return;}
+    if x >= fb.horizontal_resolution as i32 || x < 0 || y >= fb.vertical_resolution as i32 || y < 0 {return;}
     
-    let pixel_position = ((fb.pixels_per_scanline * y + x) * 4) as usize;
+    let pixel_position = ((fb.pixels_per_scanline as i32 * y + x) * 4) as usize;
     
     fb.frame_buffer[pixel_position] = color.2;
     fb.frame_buffer[pixel_position+1] = color.1;
     fb.frame_buffer[pixel_position+2] = color.0;
 }
 
-fn write_rgb(fb: &mut FrameBuffer, pos: Vec2<u32>, color: PixelColor) {
+fn write_rgb(fb: &mut FrameBuffer, pos: Vec2<i32>, color: PixelColor) {
     let (x,y) = (pos.x, pos.y);
-    if x >= fb.horizontal_resolution || y >= fb.vertical_resolution {return;}
+    if x >= fb.horizontal_resolution as i32 || x < 0 || y >= fb.vertical_resolution as i32 || y < 0 {return;}
     
-    let pixel_position = ((fb.pixels_per_scanline * y + x) * 4) as usize;
+    let pixel_position = ((fb.pixels_per_scanline as i32 * y + x) * 4) as usize;
     
     fb.frame_buffer[pixel_position] = color.0;
     fb.frame_buffer[pixel_position+1] = color.1;
@@ -28,8 +55,14 @@ fn write_rgb(fb: &mut FrameBuffer, pos: Vec2<u32>, color: PixelColor) {
 }
 
 pub struct Graphics {
-    writer: fn(&mut FrameBuffer, Vec2<u32>, PixelColor),
+    writer: fn(&mut FrameBuffer, Vec2<i32>, PixelColor),
     fb: FrameBuffer
+}
+
+impl PixelWriter for Graphics {
+    fn write(&mut self, pos: Vec2<i32>, color: PixelColor) {
+        (self.writer)(&mut self.fb, pos, color);
+    }
 }
 
 impl Graphics {
@@ -43,32 +76,6 @@ impl Graphics {
         }
     }
 
-    pub fn write_pixel(&mut self, pos: Vec2<u32>, c: PixelColor) {
-        (self.writer)(&mut self.fb, pos, c);
-    }
-
-    pub fn fill_rect(&mut self, pos: Vec2<u32>, size: Vec2<u32>, c: PixelColor) {
-        for x in pos.x..pos.x + size.x {
-            for y in pos.y..pos.y + size.y {
-                self.write_pixel(&pos + &Vec2::new(x,y), c);
-            }
-        }
-    }
-
-    pub fn draw_bitpattern<const N: usize>(&mut self, pos: Vec2<u32>, pattern: &[u64;N], c: PixelColor, scale: u32) {
-        for dy in 0..N {
-            for dx in 0usize..64 {
-                if (pattern[dy] >> (63-dx)) & 1 == 1 {
-                    self.fill_rect(
-                        &pos + &Vec2::new(scale*dx as u32, scale * dy as u32),
-                        Vec2::new(scale, scale), 
-                        c
-                    );
-                }
-            }
-        }
-    }
-    
     pub fn pixels_per_scanline(&self) -> u32 {
         self.fb.pixels_per_scanline
     }
@@ -78,7 +85,7 @@ impl Graphics {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Vec2<T>{
     pub x: T,
     pub y: T
@@ -100,8 +107,19 @@ impl<T> Add<&Vec2<T>> for &Vec2<T> where for<'a, 'b> &'a T: Add<&'b T, Output = 
     }
 }
 
-impl<T> Into<Vec2<T>> for (T,T) {
-    fn into(self) -> Vec2<T> {
-        Vec2 { x: self.0, y: self.1 }
+
+impl<T> Add<Vec2<T>> for Vec2<T> where T: Add<T, Output = T>{
+    type Output = Vec2<T>;
+    fn add(self, rhs: Vec2<T>) -> Self::Output {
+        Vec2 {
+            x: (self.x) + (rhs.x),
+            y: (self.y) + (rhs.y) 
+        }
+    }
+}
+
+impl<T> From<(T,T)> for Vec2<T> {
+    fn from(value: (T,T)) -> Self {
+        Vec2 { x: value.0, y: value.1 }
     }
 }

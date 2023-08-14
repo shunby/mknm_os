@@ -1,20 +1,20 @@
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{graphics::{PixelColor, Graphics}, interrupt};
+use crate::graphics::{PixelColor, PixelWriter};
 
-pub fn write_ascii(graphics: &mut Graphics, x: u32, y: u32, c: char, color: PixelColor) {
+pub fn write_ascii(graphics: &mut impl PixelWriter, x: u32, y: u32, c: char, color: PixelColor) {
     if c as usize >= FONTS.len() {return;}
 
     for dy in 0..16u32 {
         for dx in 0..8u32 {
             if ((FONTS[c as usize][dy as usize] << dx) & 0b10000000) != 0 {
-                graphics.write_pixel((x+dx, y+dy).into(), color);
+                graphics.write(((x+dx) as i32, (y+dy) as i32).into(), color);
             }
         }
     }
 }
 
-pub fn write_string(graphics: &mut Graphics, x: u32, y: u32, str: &[u8], color: PixelColor) {
+pub fn write_string(graphics: &mut impl PixelWriter, x: u32, y: u32, str: &[u8], color: PixelColor) {
     for i in 0u32..str.len() as u32 {
         write_ascii(graphics, x + 8 * i, y, str[i as usize] as char, color);
     }

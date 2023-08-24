@@ -84,6 +84,14 @@ impl Window {
     pub fn pos(&self) -> Vec2<i32> {
         self.pos
     }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
 }
 
 impl PixelWriter for Window {

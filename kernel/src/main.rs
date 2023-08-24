@@ -199,10 +199,17 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     setup_identity_page_table();
     init_allocators(&memmap);
     initialize_lapic_timer();
+    set_interrupt_flag(false);   
 
-    let fb = FrameBuffer::from_raw(fb);
+    let mut fb = FrameBuffer::from_raw(fb);
     let (display_width, display_height) = fb.resolution();
+    let display_pitch = fb.pixels_per_scanline();
     set_default_pixel_format(fb.pixel_format());
+    for y in 0..display_height {
+        for x in 0..display_width {    
+            fb.write((x as i32, y as i32).into(), (127,127,127));
+        }
+    }
     LAYERS.lock().init(LayeredWindowManager::new(fb));
     let (mouse_window_id, console_window_id) = {
         let mut layer_mgr = LAYERS.lock();
@@ -212,7 +219,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         draw_cursor(&mut mouse_window);
         let mouse_window_id = layer_mgr.new_layer(mouse_window);
     
-        let console_window = Window::new(640, 480);
+        let console_window = Window::new(display_width as usize, display_height as usize);
         let console_window_id = layer_mgr.new_layer(console_window);
         layer_mgr.up_down(console_window_id, 0);
         layer_mgr.up_down(mouse_window_id, 1);
@@ -224,6 +231,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         (100,100,100)
     ));
     
+    println!("resolution: {}x{}, pitch={}", display_width, display_height, display_pitch);
     usb_bindings::raw::SetLogLevel(1);
     usb_bindings::raw::SetPrintFn(Some(print_c));
 
@@ -269,9 +277,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    if let Some(loc) = _info.location() {
-        print!("panicked: {}: {}", loc.file(), loc.line());
-    }
+    println!("{_info}");
     unsafe {
         loop {
             asm!("hlt");
@@ -311,6 +317,7 @@ extern "x86-interrupt" fn interrupt_handler() {
             }
         }
     }
+    println!("interrupt end.");
     notify_end_of_interrupt();
 }
 

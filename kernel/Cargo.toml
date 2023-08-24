@@ -10,3 +10,8 @@ usb-bindings = {path="../usb_bindings"}
 bitfield = "0.14.0"
 lock_api = "0.4.9"
 x86_64 = "0.14.10"
+xhci = "0.9.2"
+
+[dependencies.num-traits]
+num-version = "0.2.15"
+default-features = false

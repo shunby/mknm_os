@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 cty = "0.2.2"
-usb-bindings = {path="../usb_bindings"}
 bitfield = "0.14.0"
 lock_api = "0.4.9"
 x86_64 = "0.14.10"

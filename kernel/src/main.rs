@@ -206,9 +206,6 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     
     println!("resolution: {}x{}, pitch={}", display_width, display_height, display_pitch);
 
-    usb_bindings::raw::SetLogLevel(7);
-    usb_bindings::raw::SetPrintFn(Some(print_c));
-
     // print_memmap(&memmap);
     let pci = scan_pci_devices();
     set_idt_entry(

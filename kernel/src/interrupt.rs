@@ -1,4 +1,4 @@
-use core::{mem::{MaybeUninit, size_of, transmute_copy}, arch::{global_asm, asm}};
+use core::{mem::{MaybeUninit, size_of, transmute_copy}, arch::{global_asm, asm}, fmt::{Write, Formatter, Debug, Result}};
 
 use bitfield::bitfield;
 use cty::c_void;
@@ -17,6 +17,12 @@ bitfield! {
     type_, set_type: 11,8;
     descriptor_priv_level, set_descriptor_priv_level: 14,13;
     present, set_present: 15;
+}
+
+impl Debug for InterruptDescriptorAttribute {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.write_fmt(format_args!("{:x}", self.0))
+    }
 }
 
 impl InterruptDescriptorAttribute {
@@ -46,7 +52,7 @@ pub enum DescriptorType {
     ExecuteRead    = 10,
 }
 
-#[repr(packed)]
+#[derive(Debug)]
 #[repr(C)]
 pub struct InterruptDescriptor {
     pub offset_low: u16,
@@ -75,7 +81,7 @@ static mut IDT: [MaybeUninit<InterruptDescriptor>; 256] = unsafe{MaybeUninit::un
 pub fn set_idt_entry(index: IVIndex, entry: InterruptDescriptor) {
     unsafe {
         println!("IDT entry at {}", &IDT[index as usize] as *const _ as u64);
-        println!("entry: {}", transmute_copy::<_,u128>(&entry));
+        println!("entry: {:?}", &entry);
         IDT[index as usize] = MaybeUninit::new(entry);
     }
 }

@@ -1,7 +1,8 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
+#![feature(allocator_api)]
 
 mod frame_buffer;
 #[macro_use]
@@ -16,8 +17,8 @@ mod memory_manager;
 mod segment;
 mod paging;
 mod window;
-mod xhci;
 mod timer;
+mod usb;
 
 #[macro_use]
 extern crate alloc;
@@ -37,7 +38,6 @@ use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
-use usb_bindings::raw::{usb_xhci_ConfigurePort, usb_xhci_ProcessEvent, usb_xhci_Controller};
 use window::LayeredWindowManager;
 
 use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
@@ -47,8 +47,8 @@ use crate::mouse::draw_cursor;
 use crate::paging::setup_identity_page_table;
 use crate::segment::setup_segments;
 use crate::timer::{start_lapic_timer, lapic_timer_elapsed, stop_lapic_timer, initialize_lapic_timer};
+use crate::usb::xhci::initialize_xhci;
 use crate::window::Window;
-use crate::xhci::set_default_mouse_observer;
 
 
 const LOGO: [u64;26] = [
@@ -81,10 +81,9 @@ const LOGO: [u64;26] = [
 ];
 
 static CONSOLE: LazyInit<Console> = LazyInit::new();
-static XHC: LazyInit<usb_xhci_Controller> = LazyInit::new();
 static LAYERS: LazyInit<LayeredWindowManager> = LazyInit::new();
 
-fn scan_pci_devices() {
+fn scan_pci_devices() -> PCIController {
     let mut pci = PCIController::new();
     unsafe {
         pci.scan_all_bus().unwrap();
@@ -101,7 +100,7 @@ fn scan_pci_devices() {
             ); 
         }
     }
-
+    pci
 }
 
 fn find_xhc_device() -> PCIDevice {
@@ -120,32 +119,6 @@ fn find_xhc_device() -> PCIDevice {
             }
         }
         xhc_device.unwrap().clone()
-    }
-}
-
-fn initialize_xhci_controller(xhc: &PCIDevice, mouse_observer: impl Fn(i8, i8) + 'static) -> usb_xhci_Controller {
-    unsafe {
-        let xhc_bar = xhc.read_bar(0);
-        let xhc_mmio_base = xhc_bar & !(0b1111 as u64);
-        let mut xhc = usb_bindings::raw::usb_xhci_Controller::new(xhc_mmio_base as usize);
-        let err = xhc.Initialize();
-        println!("xhc_mmio_base: {}", xhc_mmio_base);
-        println!("xhc_bar: {}", xhc_bar);
-        println!("initialize xhc: {}", err.code_);
-        xhc.Run();
-        print!("starting xhc\n");
-
-        set_default_mouse_observer(mouse_observer);
-        for i in 1..=xhc.max_ports_ {
-            let mut port = xhc.PortAt(i);
-            if port.IsConnected() {
-                let err = usb_xhci_ConfigurePort(&mut xhc, &mut port);
-                if err.code_ != 0 {
-                    println!("failed to configure port: {}", err.code_);
-                }
-            }
-        }
-        xhc
     }
 }
 
@@ -232,11 +205,12 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     ));
     
     println!("resolution: {}x{}, pitch={}", display_width, display_height, display_pitch);
-    usb_bindings::raw::SetLogLevel(1);
+
+    usb_bindings::raw::SetLogLevel(7);
     usb_bindings::raw::SetPrintFn(Some(print_c));
 
     // print_memmap(&memmap);
-    scan_pci_devices();
+    let pci = scan_pci_devices();
     set_idt_entry(
         IVIndex::XHCI, 
         InterruptDescriptor::new(
@@ -252,22 +226,24 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     println!("apic_id: {}", local_apic_id);
     configure_msi_fixed_destination(&xhc, local_apic_id as u8, IVIndex::XHCI as u8);
 
-    XHC.lock().init(initialize_xhci_controller(&xhc, move |dx,dy| {
-        start_lapic_timer();
+    let intel_ehci_found = pci.get_devices().iter().any(|dev|{
+        dev.read_vendor_id() == 0x8086 &&  dev.read_class_code().matches(0x0c, 0x03, 0x20) 
+    });
+
+    initialize_xhci(xhc, intel_ehci_found, move |report| {
         {
+            let (dx,dy) = (report.dx(), report.dy());
             let mut layers = LAYERS.lock();
             let window = layers.get_layer_mut(mouse_window_id);
             let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
             window.move_to(new_pos);
             layers.draw();
         }
-        println!("MouseObserver: elapsed = {}, cursor={:?}", lapic_timer_elapsed(), pos);
-        stop_lapic_timer();
-    }));
-    set_interrupt_flag(true);
-    
-    LAYERS.lock().draw();
+    });
+
     print!("finish\n");
+    // LAYERS.lock().draw();
+    set_interrupt_flag(true);   
     unsafe {
         loop {
             asm!("hlt");
@@ -307,17 +283,11 @@ get_cs:
 
 #[allow(dead_code)]
 extern "x86-interrupt" fn interrupt_handler() {
-    // print!("mouse move!\n");
-    unsafe {
-        let mut xhc = XHC.lock();
-        while (*xhc.PrimaryEventRing()).HasFront()  {
-            let err = usb_xhci_ProcessEvent(xhc.get_mut());
-            if err.code_ != 0 {
-                println!("error while processevent: {}", err.code_);
-            }
-        }
-    }
-    println!("interrupt end.");
+    // print!("interrupt!\n");
+    
+    usb::xhci::run_xhci_tasks();
+    
+    // println!("interrupt end.");
     notify_end_of_interrupt();
 }
 

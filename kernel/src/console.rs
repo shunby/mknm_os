@@ -68,11 +68,16 @@ impl Console {
                 drop(layers);
                 self.new_line();
                 layers = LAYERS.lock();
-            } else if self.cursor_col < self.n_cols {
-                write_ascii(layers.get_layer_mut(self.layer_id), 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
-                self.buffer[self.cursor_row][self.cursor_col] = *c;
-                self.cursor_col += 1;
+            } 
+            write_ascii(layers.get_layer_mut(self.layer_id), 8 * self.cursor_col as u32, 16 * self.cursor_row as u32, *c as char, self.fg_color);
+            self.buffer[self.cursor_row][self.cursor_col] = *c;
+            self.cursor_col += 1;
+            if self.cursor_col == self.n_cols {
+                drop(layers);
+                self.new_line();
+                layers = LAYERS.lock();
             }
+            
         }
         layers.draw();
     }

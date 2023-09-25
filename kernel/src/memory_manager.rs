@@ -340,6 +340,9 @@ impl ObjectAllocator {
 
     pub fn alloc(&mut self, layout: Layout) -> *mut u8 {
         if layout.size() > 2048 {
+            if layout.align() > BYTES_PER_FRAME {
+                unimplemented!("Page allocator cannot alloc pages aligned to >{BYTES_PER_FRAME}B.");
+            }
             return match MEM.lock().allocate((layout.size() + BYTES_PER_FRAME - 1) / BYTES_PER_FRAME) {
                 Some(id) => (id * BYTES_PER_FRAME) as *mut u8,
                 None => null_mut()

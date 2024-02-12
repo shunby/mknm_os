@@ -194,8 +194,8 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     
         let console_window = Window::new(display_width as usize, display_height as usize);
         let console_window_id = layer_mgr.new_layer(console_window);
-        layer_mgr.up_down(console_window_id, 0);
-        layer_mgr.up_down(mouse_window_id, 1);
+        layer_mgr.up_down(console_window_id.layer_id(), 0);
+        layer_mgr.up_down(mouse_window_id.layer_id(), 1);
         (mouse_window_id, console_window_id)
     };
     CONSOLE.lock().init(Console::new(  
@@ -230,10 +230,12 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     initialize_xhci(xhc, intel_ehci_found, move |report| {
         {
             let (dx,dy) = (report.dx(), report.dy());
-            let mut layers = LAYERS.lock();
-            let window = layers.get_layer_mut(mouse_window_id);
-            let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
-            window.move_to(new_pos);
+            {
+                let mut window = mouse_window_id.window().lock();
+                let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
+                window.move_to(new_pos);
+            }
+                let mut layers = LAYERS.lock();
             layers.draw();
         }
     });

@@ -1,8 +1,8 @@
 use core::iter::repeat_with;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
-use crate::{graphics::{PixelColor, Vec2, PixelWriter, Rect}, frame_buffer::FrameBuffer};
+use crate::{frame_buffer::FrameBuffer, graphics::{PixelColor, PixelWriter, Rect, Vec2}, memory_manager::Mutex};
 
 pub struct Window {
     pos: Vec2<i32>,
@@ -105,8 +105,24 @@ impl PixelWriter for Window {
 
 pub type LayerId = usize;
 
+pub struct LayerHandle {
+    window: Arc<Mutex<Window>>,
+    layer_id: LayerId
+}
+
+impl LayerHandle { 
+    pub fn layer_id(&self) -> LayerId {
+        self.layer_id
+    }
+
+    pub fn window(&self) -> &Arc<Mutex<Window>> {
+        &self.window
+    }
+}
+
+/// 複数のウィンドウを層状に並べて管理・描画する
 pub struct LayeredWindowManager {
-    layers: Vec<Window>,
+    layers: Vec<Arc<Mutex<Window>>>,
     layer_stack: Vec<LayerId>,
     buffer: FrameBuffer
 }
@@ -121,29 +137,30 @@ impl LayeredWindowManager {
     }
 
     pub fn with_layer_mut<R>(&mut self, id: LayerId, f: impl Fn(&mut Window) -> R) -> R {
-        f(&mut self.layers[id])
+        f(&mut self.layers[id].lock())
     }
 
-    pub fn get_layer_mut(&mut self, id: LayerId) -> &mut Window {
-        &mut self.layers[id]
+    pub fn get_layer_mut(&mut self, id: LayerId) -> Arc<Mutex<Window>> {
+        self.layers[id].clone()
     }
 
-    pub fn new_layer(&mut self, window: Window) -> LayerId {
-        self.layers.push(window);
-        self.layers.len()-1
+    pub fn new_layer(&mut self, window: Window) -> LayerHandle {
+        let arc = Arc::new(Mutex::new(window));
+        self.layers.push(arc.clone());
+        LayerHandle { layer_id: self.layers.len()-1, window: arc}
     }
 
     pub fn move_to(&mut self, id: LayerId, pos: Vec2<i32>) {
-        self.layers[id].move_to(pos);
+        self.layers[id].lock().move_to(pos);
     }
 
     pub fn move_relative(&mut self, id: LayerId, pos_diff: Vec2<i32>) {
-        self.layers[id].move_relative(pos_diff);
+        self.layers[id].lock().move_relative(pos_diff);
     }
 
     pub fn draw(&mut self) {
         for id in &self.layer_stack {
-            self.layers[*id].draw_to(&mut self.buffer);
+            self.layers[*id].lock().draw_to(&mut self.buffer);
         }
     }
 

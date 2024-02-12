@@ -1,3 +1,4 @@
+set -e
 WORK_DIR=/app
 SRC_DIR=/app/workspace
 IMG_FILE=$WORK_DIR/disk2.img

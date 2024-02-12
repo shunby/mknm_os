@@ -6,9 +6,9 @@ pub trait PixelWriter {
     fn write(&mut self, pos: Vec2<i32>, color: PixelColor);
 
     fn fill_rect(&mut self, pos: Vec2<i32>, size: Vec2<u32>, c: PixelColor) {
-        for x in pos.x..pos.x + size.x as i32 {
-            for y in pos.y..pos.y + size.y as i32 {
-                self.write(&pos + &Vec2::new(x,y), c);
+        for x in 0..size.x as i32 {
+            for y in 0..size.y as i32 {
+                self.write(pos + Vec2::new(x,y), c);
             }
         }
     }

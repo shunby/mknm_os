@@ -44,7 +44,6 @@ use xhci::{
 use crate::{
     memory_manager::{LazyInit, Mutex},
     pci::PCIDevice,
-    timer::{lapic_timer_elapsed, start_lapic_timer, stop_lapic_timer},
     usb::{
         runtime::{new_channel, new_executor_and_spawner},
         usbd::UsbDriver,
@@ -131,20 +130,6 @@ pub enum XhciError {
 }
 
 pub(super) static XHCI: LazyInit<Arc<XhciController>> = LazyInit::new();
-
-fn wait_for(ms: u32) {
-    for _ in 0..ms {
-        start_lapic_timer();
-        while lapic_timer_elapsed() < 3000000 {
-            for _ in 0..1000 {
-                unsafe {
-                    asm!("nop");
-                }
-            }
-        } // 3.0GHz * 1ms ?
-        stop_lapic_timer();
-    }
-}
 
 #[repr(C)]
 struct XhciCapability {
@@ -266,7 +251,7 @@ pub unsafe fn initialize_xhci(
         x.set_host_controller_reset();
     });
     // Intel® 8/C220 Series Chipset may hung if registers are accessed within 1ms from hc reset
-    wait_for(20);
+    // wait_for(20);
     while op.usbcmd.read_volatile().host_controller_reset() {}
     while op.usbsts.read_volatile().controller_not_ready() {}
 
@@ -983,7 +968,7 @@ impl XhciController {
         let slot_id = self.enable_slot_async().await?;
 
         self.address_device_async(port_id, slot_id, false).await?;
-        wait_for(200);
+        // wait_for(200);
 
         println!("Addressing finished: port={port_id}, slot={slot_id}");
 

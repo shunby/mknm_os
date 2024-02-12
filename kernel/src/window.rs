@@ -190,4 +190,8 @@ impl LayeredWindowManager {
             }
         }
     }
+
+    pub fn resolution(&self) -> (u32, u32) {
+        self.buffer.resolution()
+    }
 }

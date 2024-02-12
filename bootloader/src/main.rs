@@ -7,11 +7,11 @@ mod memory_map;
 
 extern crate alloc;
 
-use core::{arch::asm, mem::transmute};
+use core::{arch::asm, ffi::c_void, mem::transmute};
 
 use frame_buffer::{FrameBufferConfig, PixelFormat};
 use memory_map::MemoryMapRaw;
-use uefi::{prelude::*, table::boot::{AllocateType, MemoryType, SearchType, ScopedProtocol, OpenProtocolParams}, proto::console::gop::GraphicsOutput, Result, data_types::PhysicalAddress};
+use uefi::{data_types::PhysicalAddress, prelude::*, proto::console::gop::GraphicsOutput, table::{boot::{AllocateType, MemoryType, OpenProtocolParams, ScopedProtocol, SearchType}, cfg::{ACPI2_GUID, ACPI_GUID}}, Result};
 
 use crate::elf::{ElfFile, Elf64_PhdrType};
 
@@ -58,7 +58,7 @@ fn copy_slice_pad(to: &mut [u8], from: &[u8]) {
     to[from.len()..].fill(0);
 }
 
-type EntryPointFn = extern "sysv64" fn(*const FrameBufferConfig, *const MemoryMapRaw);
+type EntryPointFn = extern "sysv64" fn(*const FrameBufferConfig, *const MemoryMapRaw, *const c_void);
 unsafe fn load_kernel(boot_services: &BootServices, image_handle: Handle) -> EntryPointFn {
     let mut fs = boot_services.get_image_file_system(image_handle).expect("failed to get file system");
     let kernel_file = fs.read(cstr16!("\\kernel.elf")).expect("failed to read '\\kernel.elf'");
@@ -104,6 +104,11 @@ fn construct_frame_buffer(boot_services: &BootServices) -> Result<FrameBufferCon
     })
 }
 
+fn find_acpi_table(system_table: &SystemTable<Boot>) -> *const c_void{
+    system_table.config_table().iter().find(|table|table.guid == ACPI2_GUID)
+        .expect("failed to get ACPI table").address
+}
+
 #[entry]
 unsafe fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     uefi_services::init(&mut system_table).unwrap();
@@ -114,16 +119,18 @@ unsafe fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Sta
 
     let entry_point = load_kernel(boot_services, image_handle);
     
+    let acpi_table_address = find_acpi_table(&system_table);
+    
     let frame_buffer_config = construct_frame_buffer(boot_services)
         .expect("failed to construct frame buffer config");
 
     let mut memmap_buf = [0u8; 4096*4];
     let memmap = get_memory_map(boot_services, &mut memmap_buf);
 
+
     let (_, _) = system_table.exit_boot_services();
 
-    //FIXME: GOPのFrameBufferをboot_servicesの外に持ち出してしまっている
-    entry_point(&frame_buffer_config as _, &memmap as _);
+    entry_point(&frame_buffer_config as _, &memmap as _, acpi_table_address);
 
     halt();
 }

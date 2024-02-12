@@ -7,6 +7,7 @@ use cty::c_void;
 #[derive(Debug, Clone, Copy)]
 pub enum IVIndex {
     XHCI = 0x40,
+    LapicTimer = 0x41
 }
 
 bitfield! {

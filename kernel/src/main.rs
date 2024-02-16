@@ -30,6 +30,7 @@ use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 use core::str::from_utf8;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use acpi::RSDP;
 use alloc::collections::VecDeque;
@@ -291,15 +292,21 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 
     loop {
         set_interrupt_flag(false);
-        if EVENTS.lock().cnt == 0 {
+        if EVENTS.lock().cnt == 0 && TIMER_ELAPSED.load(Ordering::Relaxed) == 0 {
             set_interrupt_flag(true);
-            //asm!("hlt"); // 割り込みがあるまで休眠
+            asm!("hlt"); // 割り込みがあるまで休眠
             continue;
         }
 
+        let elapsed = TIMER_ELAPSED.swap(0, Ordering::Relaxed);
+        if elapsed > 0 {
+            timer::on_lapic_interrupt(elapsed);
+        }
+
+
         // println!("{:?}", EVENTS.lock().data);
 
-        let msg = EVENTS.lock().pop().unwrap();
+        let msg = EVENTS.lock().pop();
         set_interrupt_flag(true);
 
         {
@@ -314,9 +321,8 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         }
 
         match msg {
-            Message::Xhci => usb::xhci::run_xhci_tasks(),
-            Message::TimerInterrupt => timer::on_lapic_interrupt(),
-            Message::TimerTimeout(val) => match val {
+            Some(Message::Xhci) => usb::xhci::run_xhci_tasks(),
+            Some(Message::TimerTimeout(val)) => match val {
                 1 => {
                     let tick = get_current_tick();
                     println!("tick {}: timer 1", tick);
@@ -369,7 +375,6 @@ get_cs:
 #[derive(Clone, Copy, Debug)]
 enum Message {
     Xhci,
-    TimerInterrupt,
     TimerTimeout(u64)
 }
 
@@ -420,9 +425,9 @@ extern "x86-interrupt" fn xhci_interrupt_handler() {
     notify_end_of_interrupt();
 }
 
+static TIMER_ELAPSED: AtomicU64 = AtomicU64::new(0);
 extern "x86-interrupt" fn lapic_interrupt_handler() {
-    let mut lock = EVENTS.lock();
-    let _ = lock.push(Message::TimerInterrupt);
+    TIMER_ELAPSED.fetch_add(1, Ordering::Relaxed);
     notify_end_of_interrupt();
 }
 

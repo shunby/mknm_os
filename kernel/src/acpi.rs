@@ -3,7 +3,7 @@ use core::{mem::{size_of, size_of_val}, slice::from_raw_parts};
 use alloc::string::String;
 use alloc::string::ToString;
 
-use crate::{memory_manager::LazyInit, pci::io_in_32};
+use crate::{memory_manager::LazyInit, asm};
 
 #[repr(C, packed)]
 pub struct RSDP {
@@ -132,15 +132,15 @@ pub fn wait_millis(msec: u32) {
     let pm_timer_is_32 = (fadt.flags >> 8) & 1 != 0;
 
     unsafe {
-        let start = io_in_32(fadt.pm_tmr_blk as u16);
+        let start = asm::io_in_32(fadt.pm_tmr_blk as u16);
         let mut end = start.wrapping_add(PM_TIMER_FREQ * msec / 1000);
         if !pm_timer_is_32 { // 24bit
             end &= 0x00ffffff;
         }
         
         if end < start { // overflow, wait until `fadt.pm_tmr_blk == 0`
-            while io_in_32(fadt.pm_tmr_blk as u16) >= start {} 
+            while asm::io_in_32(fadt.pm_tmr_blk as u16) >= start {} 
         }
-        while io_in_32(fadt.pm_tmr_blk as u16) < end {}
+        while asm::io_in_32(fadt.pm_tmr_blk as u16) < end {}
     }
 }

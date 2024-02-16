@@ -3,11 +3,48 @@ use core::{mem::{MaybeUninit, size_of, transmute_copy}, arch::{global_asm, asm},
 use bitfield::bitfield;
 use cty::c_void;
 
-// Interrupt Vector Index
-#[derive(Debug, Clone, Copy)]
-pub enum IVIndex {
-    XHCI = 0x40,
-    LapicTimer = 0x41
+/// 割り込みベクタ。各割り込み要因に対応するInterruptDescriptorが格納される。
+static mut IDT: [MaybeUninit<InterruptDescriptor>; 256] = unsafe{MaybeUninit::uninit().assume_init()};
+
+/// 割り込みベクタの`index`で指定されたスロットに`entry`を格納する
+pub fn set_idt_entry(index: IVIndex, entry: InterruptDescriptor) {
+    unsafe {
+        println!("IDT entry at {}", &IDT[index as usize] as *const _ as u64);
+        println!("entry: {:?}", &entry);
+        IDT[index as usize] = MaybeUninit::new(entry);
+    }
+}
+
+/// IDTのサイズとオフセットをCPUに登録する。内部でx86_64のlidt命令を呼ぶ。
+pub fn load_idt() {
+    unsafe {
+        let limit = (size_of::<[MaybeUninit<InterruptDescriptor>; 256]>()-1) as u16;
+        let offset = &IDT as *const _;
+        println!("load_idt: limit={}, offser={}", limit, offset as u64);
+        _load_idt(limit, offset);
+    }
+}
+
+/// 全ての割り込みを一括で有効・無効にする。
+pub fn set_interrupt_flag(flag: bool) {
+    unsafe {
+        if flag {
+            asm!("sti");
+        } else {
+            asm!("cli");
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct InterruptDescriptor {
+    pub offset_low: u16,
+    pub segment_selector: u16,
+    pub attr: InterruptDescriptorAttribute,
+    pub offset_middle: u16,
+    pub offset_high : u32,
+    pub reserved: u32,
 }
 
 bitfield! {
@@ -20,21 +57,12 @@ bitfield! {
     present, set_present: 15;
 }
 
-impl Debug for InterruptDescriptorAttribute {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        f.write_fmt(format_args!("{:x}", self.0))
-    }
-}
 
-impl InterruptDescriptorAttribute {
-    pub fn new(dpl: u8, type_: DescriptorType) -> Self {
-        let mut res = InterruptDescriptorAttribute(0);
-        res.set_present(true);
-        res.set_descriptor_priv_level(dpl);
-        res.set_type(type_ as u8);
-        res.set_interrupt_stack_table(0);
-        res
-    }
+// Interrupt Vector Index
+#[derive(Debug, Clone, Copy)]
+pub enum IVIndex {
+    XHCI = 0x40,
+    LapicTimer = 0x41
 }
 
 #[repr(u8)]
@@ -53,17 +81,6 @@ pub enum DescriptorType {
     ExecuteRead    = 10,
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct InterruptDescriptor {
-    pub offset_low: u16,
-    pub segment_selector: u16,
-    pub attr: InterruptDescriptorAttribute,
-    pub offset_middle: u16,
-    pub offset_high : u32,
-    pub reserved: u32,
-}
-
 impl InterruptDescriptor {
     pub fn new(segment_selector: u16, attr: InterruptDescriptorAttribute, offset: *const c_void) -> Self {
         Self {
@@ -77,32 +94,20 @@ impl InterruptDescriptor {
     }
 }
 
-static mut IDT: [MaybeUninit<InterruptDescriptor>; 256] = unsafe{MaybeUninit::uninit().assume_init()};
-
-pub fn set_idt_entry(index: IVIndex, entry: InterruptDescriptor) {
-    unsafe {
-        println!("IDT entry at {}", &IDT[index as usize] as *const _ as u64);
-        println!("entry: {:?}", &entry);
-        IDT[index as usize] = MaybeUninit::new(entry);
+impl Debug for InterruptDescriptorAttribute {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.write_fmt(format_args!("{:x}", self.0))
     }
 }
 
-pub fn load_idt() {
-    unsafe {
-        let limit = (size_of::<[MaybeUninit<InterruptDescriptor>; 256]>()-1) as u16;
-        let offset = &IDT as *const _;
-        println!("load_idt: limit={}, offser={}", limit, offset as u64);
-        _load_idt(limit, offset);
-    }
-}
-
-pub fn set_interrupt_flag(flag: bool) {
-    unsafe {
-        if flag {
-            asm!("sti");
-        } else {
-            asm!("cli");
-        }
+impl InterruptDescriptorAttribute {
+    pub fn new(dpl: u8, type_: DescriptorType) -> Self {
+        let mut res = InterruptDescriptorAttribute(0);
+        res.set_present(true);
+        res.set_descriptor_priv_level(dpl);
+        res.set_type(type_ as u8);
+        res.set_interrupt_stack_table(0);
+        res
     }
 }
 

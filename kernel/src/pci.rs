@@ -1,5 +1,7 @@
-use core::{arch::global_asm, mem::{MaybeUninit, transmute, transmute_copy}};
+/// Peripheral Component Interconnect (PCI) デバイス
 
+use core::{mem::{MaybeUninit, transmute, transmute_copy}};
+use crate::asm;
 use bitfield::bitfield;
 
 fn make_address(bus: u8, device: u8, function: u8, reg_addr: u8) -> u32 {
@@ -11,35 +13,28 @@ fn make_address(bus: u8, device: u8, function: u8, reg_addr: u8) -> u32 {
 const CONFIG_ADDRESS: u16 = 0x0cf8;
 const CONFIG_DATA: u16 = 0x0cfc;
 
-extern "sysv64" {
-    // Read from IO address space
-    pub fn io_in_32(addr: u16) -> u32;
-    // Write to IO address space
-    pub fn io_out_32(addr: u16, data: u32);
-}
-global_asm!(r#" 
-.globl io_out_32
-io_out_32:
-    mov dx, di
-    mov eax, esi
-    out dx, eax
-    ret
-.globl io_in_32
-io_in_32:
-    mov dx, di
-    in eax, dx
-    ret
-"#
-);
 
 unsafe fn read_confreg(address: u32) -> u32 {
-    io_out_32(CONFIG_ADDRESS, address);
-    io_in_32(CONFIG_DATA)
+    asm::io_out_32(CONFIG_ADDRESS, address);
+    asm::io_in_32(CONFIG_DATA)
 }
 
 unsafe fn write_confreg(address: u32, value: u32) {
-    io_out_32(CONFIG_ADDRESS, address);
-    io_out_32(CONFIG_DATA, value);
+    asm::io_out_32(CONFIG_ADDRESS, address);
+    asm::io_out_32(CONFIG_DATA, value);
+}
+
+
+pub struct PCIController {
+    devices: [MaybeUninit<PCIDevice>; 32],
+    num_devices: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PCIDevice {
+    bus: u8,
+    device: u8,
+    function: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -49,17 +44,91 @@ pub struct ClassCode {
     pub interface: u8,
 }
 
-impl ClassCode {
-    pub fn matches(&self, base: u8, sub: u8, interface: u8) -> bool {
-        (self.base, self.sub, self.interface) == (base, sub, interface)
+impl PCIController {
+    pub fn new() -> Self {
+        Self {
+            devices: unsafe { MaybeUninit::uninit().assume_init() },
+            num_devices: 0,
+        }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct PCIDevice {
-    bus: u8,
-    device: u8,
-    function: u8,
+    /// 全てのPCIバスをスキャンし、接続されたデバイスを記憶する
+    pub unsafe fn scan_all_bus(&mut self) -> Result<(), PCIError> {
+        let host_bridge = PCIDevice::new(0, 0, 0);
+
+        if host_bridge.is_single_function_device() {
+            self.scan_bus(0)?;
+        } else {
+            for function in 0..8 {
+                if PCIDevice::new(0, 0, function).read_vendor_id() != 0xffff {
+                    self.scan_bus(function)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 現在記憶しているデバイスを返す
+    pub fn get_devices(&self) -> &[PCIDevice] {
+        unsafe {transmute(&self.devices[..self.num_devices])}
+    }
+
+    pub fn num_devices(&self) -> usize {
+        self.num_devices
+    }
+
+    fn add_device(&mut self, device: PCIDevice) -> Result<(), PCIError> {
+        if self.num_devices == self.devices.len() {
+            return Err(PCIError::DevicesAreFull);
+        }
+        self.devices[self.num_devices] = MaybeUninit::new(device);
+        self.num_devices += 1;
+        Ok(())
+    }
+
+    unsafe fn scan_bus(&mut self, bus: u8) -> Result<(), PCIError> {
+        for device in 0..32 {
+            if PCIDevice::new(bus, device, 0).is_valid() {
+                self.scan_device(bus, device)?;
+            }
+        }
+        Ok(())
+    }
+
+    unsafe fn scan_device(&mut self, bus: u8, device: u8) -> Result<(), PCIError> {
+        let device_zero = self.scan_function(bus, device, 0)?;
+
+        if device_zero.is_single_function_device() {
+            return Ok(());
+        }
+
+        for function in 1..8 {
+            if PCIDevice::new(bus, device, function).is_valid() {
+                self.scan_function(bus, device, function)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    unsafe fn scan_function(
+        &mut self,
+        bus: u8,
+        device: u8,
+        function: u8,
+    ) -> Result<PCIDevice, PCIError> {
+        let device = PCIDevice::new(bus, device, function);
+        self.add_device(device.clone())?;
+
+        let class_code = device.read_class_code();
+        if class_code.base == 0x06 && class_code.sub == 0x04 {
+            // standard PCI-PCI bridge
+            let bus_numbers = device.read_bus_numbers();
+            let secondary_bus = ((bus_numbers >> 8) & 0xff) as u8;
+            self.scan_bus(secondary_bus)?;
+        }
+        Ok(device)
+    }
 }
 
 impl PCIDevice {
@@ -135,9 +204,11 @@ impl PCIDevice {
         self.read_vendor_id() != 0xffff
     }
 }
-pub struct PCIController {
-    devices: [MaybeUninit<PCIDevice>; 32],
-    num_devices: usize,
+
+impl ClassCode {
+    pub fn matches(&self, base: u8, sub: u8, interface: u8) -> bool {
+        (self.base, self.sub, self.interface) == (base, sub, interface)
+    }
 }
 
 #[derive(Debug)]
@@ -145,90 +216,6 @@ pub enum PCIError {
     DevicesAreFull,
 }
 
-impl PCIController {
-    pub fn new() -> Self {
-        Self {
-            devices: unsafe { MaybeUninit::uninit().assume_init() },
-            num_devices: 0,
-        }
-    }
-
-    pub fn get_devices(&self) -> &[PCIDevice] {
-        unsafe {transmute(&self.devices[..self.num_devices])}
-    }
-
-    pub fn num_devices(&self) -> usize {
-        self.num_devices
-    }
-
-    fn add_device(&mut self, device: PCIDevice) -> Result<(), PCIError> {
-        if self.num_devices == self.devices.len() {
-            return Err(PCIError::DevicesAreFull);
-        }
-        self.devices[self.num_devices] = MaybeUninit::new(device);
-        self.num_devices += 1;
-        Ok(())
-    }
-
-    pub unsafe fn scan_all_bus(&mut self) -> Result<(), PCIError> {
-        let host_bridge = PCIDevice::new(0, 0, 0);
-
-        if host_bridge.is_single_function_device() {
-            self.scan_bus(0)?;
-        } else {
-            for function in 0..8 {
-                if PCIDevice::new(0, 0, function).read_vendor_id() != 0xffff {
-                    self.scan_bus(function)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    unsafe fn scan_bus(&mut self, bus: u8) -> Result<(), PCIError> {
-        for device in 0..32 {
-            if PCIDevice::new(bus, device, 0).is_valid() {
-                self.scan_device(bus, device)?;
-            }
-        }
-        Ok(())
-    }
-
-    unsafe fn scan_device(&mut self, bus: u8, device: u8) -> Result<(), PCIError> {
-        let device_zero = self.scan_function(bus, device, 0)?;
-
-        if device_zero.is_single_function_device() {
-            return Ok(());
-        }
-
-        for function in 1..8 {
-            if PCIDevice::new(bus, device, function).is_valid() {
-                self.scan_function(bus, device, function)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    unsafe fn scan_function(
-        &mut self,
-        bus: u8,
-        device: u8,
-        function: u8,
-    ) -> Result<PCIDevice, PCIError> {
-        let device = PCIDevice::new(bus, device, function);
-        self.add_device(device.clone())?;
-
-        let class_code = device.read_class_code();
-        if class_code.base == 0x06 && class_code.sub == 0x04 {
-            // standard PCI-PCI bridge
-            let bus_numbers = device.read_bus_numbers();
-            let secondary_bus = ((bus_numbers >> 8) & 0xff) as u8;
-            self.scan_bus(secondary_bus)?;
-        }
-        Ok(device)
-    }
-}
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq)]
@@ -248,8 +235,6 @@ pub struct PCICapabilityHeader {
 pub enum MSIDestinationMode {
     Fixed = 0b000,
 }
-
-
 
 bitfield!{
     struct MSICapabilityHeader (u32);

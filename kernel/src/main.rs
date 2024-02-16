@@ -20,6 +20,7 @@ mod window;
 mod acpi;
 mod timer;
 mod usb;
+mod asm;
 
 #[macro_use]
 extern crate alloc;
@@ -237,8 +238,6 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         (100,100,100)
     ));
     
-
-    // print_memmap(&memmap);
     let pci = scan_pci_devices();
 
     EVENTS.lock().init(MessageQueue::new());

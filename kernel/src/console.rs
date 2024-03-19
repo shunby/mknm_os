@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lock_api::MutexGuard;
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, memory_manager::{LazyInit, SingleMutex}, window::{LayerHandle, LayerId, Window}, PixelWriter, LAYERS};
+use crate::{graphic::font::{write_ascii, write_string}, graphic::graphics::{PixelColor, Rect}, memory_manager::{LazyInit, SingleMutex}, graphic::window::{LayerHandle, LayerId, Window}, PixelWriter, LAYERS};
 
 static CONSOLE: LazyInit<Console> = LazyInit::new();
 

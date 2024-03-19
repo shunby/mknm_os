@@ -1,6 +1,6 @@
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::graphics::{PixelColor, PixelWriter};
+use super::graphics::{PixelColor, PixelWriter};
 
 pub fn write_ascii(graphics: &mut impl PixelWriter, x: u32, y: u32, c: char, color: PixelColor) {
     if c as usize >= FONTS.len() {return;}

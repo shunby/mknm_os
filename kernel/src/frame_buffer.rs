@@ -3,7 +3,7 @@ use core::slice::from_raw_parts_mut;
 use alloc::vec::Vec;
 
 use crate::{
-    graphics::{PixelWriter, Rect, Vec2},
+    graphic::graphics::{PixelWriter, Rect, Vec2},
     memory_manager::Mutex,
 };
 
@@ -202,7 +202,7 @@ impl FrameBuffer {
 }
 
 impl PixelWriter for FrameBuffer {
-    fn write(&mut self, pos: crate::graphics::Vec2<i32>, color: crate::graphics::PixelColor) {
+    fn write(&mut self, pos: crate::graphic::graphics::Vec2<i32>, color: crate::graphic::graphics::PixelColor) {
         let i_pixel: usize =
             self.conf.pixels_per_scanline as usize * pos.y as usize + pos.x as usize;
         match &mut self.data {

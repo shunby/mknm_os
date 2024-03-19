@@ -2,8 +2,8 @@ use core::iter::repeat_with;
 
 use alloc::{sync::Arc, vec::Vec};
 
-use crate::{frame_buffer::FrameBuffer, graphics::{PixelColor, PixelWriter, Rect, Vec2}, memory_manager::Mutex};
-
+use crate::{frame_buffer::FrameBuffer, memory_manager::Mutex};
+use super::graphics::{PixelColor, PixelWriter, Rect, Vec2};
 pub struct Window {
     pos: Vec2<i32>,
     width: usize,

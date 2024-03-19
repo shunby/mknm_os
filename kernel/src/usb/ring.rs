@@ -13,6 +13,8 @@ use alloc::string::ToString;
 
 use alloc::boxed::Box;
 
+use crate::{println, print};
+
 pub struct ProducerRing {
     data: Box<[UnknownTRB]>,
     cycle_state: bool,

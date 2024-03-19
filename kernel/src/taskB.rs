@@ -1,5 +1,5 @@
-use crate::{font::write_string, task::{switch_context, TaskContext}, window::{self, Window}, LAYERS, TASK_A_CTX, TASK_B_CTX};
-use crate::graphics::{PixelWriter};
+use crate::{graphic::font::write_string, task::{switch_context, TaskContext}, graphic::window::{self, Window}, LAYERS, TASK_A_CTX, TASK_B_CTX};
+use crate::graphic::graphics::{PixelWriter};
 use crate::println;
 
 fn initialize_taskB_window() -> window::LayerHandle {

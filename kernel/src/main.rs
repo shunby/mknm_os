@@ -5,9 +5,8 @@
 #![feature(allocator_api)]
 
 mod frame_buffer;
+mod graphic;
 #[macro_use]
-mod font;
-mod graphics;
 mod console;
 mod pci;
 mod mouse;
@@ -16,7 +15,6 @@ mod memory_map;
 mod memory_manager;
 mod segment;
 mod paging;
-mod window;
 mod acpi;
 mod timer;
 mod usb;
@@ -40,19 +38,19 @@ use alloc::collections::VecDeque;
 use alloc::string::ToString;
 use console::Console;
 use frame_buffer::FrameBufferRaw;
-use graphics::PixelWriter;
+use graphic::graphics::PixelWriter;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
-use window::LayeredWindowManager;
+use graphic::window::LayeredWindowManager;
 
 use crate::asm::get_cr3;
 use crate::console::init_console;
-use crate::font::{write_ascii, write_string};
+use crate::graphic::font::{write_ascii, write_string};
 use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
-use crate::graphics::Vec2;
+use crate::graphic::graphics::Vec2;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
 use crate::mouse::draw_cursor;
@@ -61,7 +59,7 @@ use crate::segment::{setup_segments, KERNEL_CS, KERNEL_SS};
 use crate::task::{switch_context, TaskContext};
 use crate::timer::{add_timer, get_current_tick, initialize_timer};
 use crate::usb::xhci::initialize_xhci;
-use crate::window::Window;
+use crate::graphic::window::Window;
 
 
 const LOGO: [u64;26] = [
@@ -196,7 +194,7 @@ pub fn draw_window(window: &mut Window, title: &[u8]) {
 
 }
 
-unsafe fn initialize_windows(fb: *const FrameBufferRaw) -> (window::LayerHandle, window::LayerHandle, window::LayerHandle) {
+unsafe fn initialize_windows(fb: *const FrameBufferRaw) -> (graphic::window::LayerHandle, graphic::window::LayerHandle, graphic::window::LayerHandle) {
     let mut fb = FrameBuffer::from_raw(fb);
     set_default_pixel_format(fb.pixel_format());
     LAYERS.lock().init(LayeredWindowManager::new(fb));

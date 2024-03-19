@@ -1,4 +1,4 @@
-use crate::graphics::{Vec2, PixelWriter};
+use crate::graphic::graphics::{Vec2, PixelWriter};
 
 
 const MOUSE_CURSOR_DIMENSION: (usize, usize) = (15, 24);

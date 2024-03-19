@@ -4,6 +4,9 @@ use bitfield::bitfield;
 
 use crate::interrupt::DescriptorType;
 
+pub const KERNEL_CS: u16 = 1 << 3;
+pub const KERNEL_SS: u16 = 2 << 3;
+
 bitfield! {
     pub struct SegmentDescriptor(u64);
     u16;
@@ -66,8 +69,8 @@ pub fn setup_segments() {
         load_gdt();
         set_ds_es_fs_gs(0);
         set_cs_ss(
-            1 << 3, // GLOBAL_DESCRIPTOR_TABLE[1]
-            2<< 3   // GLOBAL_DESCRIPTOR_TABLE[2]
+            KERNEL_CS, // GLOBAL_DESCRIPTOR_TABLE[1]
+            KERNEL_SS   // GLOBAL_DESCRIPTOR_TABLE[2]
         );
 
     }

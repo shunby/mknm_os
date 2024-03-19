@@ -21,6 +21,8 @@ mod acpi;
 mod timer;
 mod usb;
 mod asm;
+mod task;
+mod taskB;
 
 #[macro_use]
 extern crate alloc;
@@ -46,6 +48,7 @@ use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
 use window::LayeredWindowManager;
 
+use crate::asm::get_cr3;
 use crate::font::{write_ascii, write_string};
 use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
 use crate::graphics::Vec2;
@@ -53,7 +56,8 @@ use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
 use crate::mouse::draw_cursor;
 use crate::paging::setup_identity_page_table;
-use crate::segment::setup_segments;
+use crate::segment::{setup_segments, KERNEL_CS, KERNEL_SS};
+use crate::task::{switch_context, TaskContext};
 use crate::timer::{add_timer, get_current_tick, initialize_timer};
 use crate::usb::xhci::initialize_xhci;
 use crate::window::Window;
@@ -174,7 +178,7 @@ pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const M
     }
 }
 
-fn draw_window(window: &mut Window, title: &[u8]) {
+pub fn draw_window(window: &mut Window, title: &[u8]) {
     let win_h = window.height() as u32;
     let win_w = window.width() as u32;
     window.fill_rect((0,0).into(), (win_w,1).into(), (0xc6,0xc6,0xc6));
@@ -220,6 +224,9 @@ unsafe fn initialize_windows(fb: *const FrameBufferRaw) -> (window::LayerHandle,
     layer_mgr.up_down(mouse_window_hndl.layer_id(), 2);
     (mouse_window_hndl, console_window_hndl, test_window_hndl)
 }
+
+pub static mut TASK_A_CTX: TaskContext = TaskContext::new();
+pub static mut TASK_B_CTX: TaskContext = TaskContext::new();
 
 #[no_mangle]
 pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw, rsdp: *const RSDP) -> ! {
@@ -285,6 +292,20 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     print!("finish\n");
     // LAYERS.lock().draw();
     set_interrupt_flag(true);   
+
+    let task_b_stack = vec![0u64;1024];
+    let task_b_stack_end = (&task_b_stack[1023]) as *const u64 as u64 + 8;
+
+    TASK_B_CTX.rip = taskB::taskB as *const fn() as u64;
+    TASK_B_CTX.rdi = 1;
+    TASK_B_CTX.rsi = 42;
+
+    TASK_B_CTX.cr3 = get_cr3();
+    TASK_B_CTX.rflags = 0x202;
+    TASK_B_CTX.cs = KERNEL_CS as u64;
+    TASK_B_CTX.ss = KERNEL_SS as u64;
+    TASK_B_CTX.rsp = (task_b_stack_end & !0xfu64) - 8;
+    TASK_B_CTX.fxsave_area[6] = 0x1f80;
     
     add_timer(get_current_tick() + 200, 1);
     add_timer(get_current_tick() + 600, 2);
@@ -337,6 +358,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             _ => ()
         }
 
+        switch_context(&TASK_B_CTX, &mut TASK_A_CTX);
     }
     
 }

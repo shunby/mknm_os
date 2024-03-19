@@ -1,24 +1,24 @@
-use core::{mem::{MaybeUninit, size_of, transmute_copy}, arch::{global_asm, asm}, fmt::{Write, Formatter, Debug, Result}};
+use core::{arch::{asm, global_asm}, fmt::{Debug, Formatter, Result, Write}, iter, mem::{self, size_of, transmute_copy, MaybeUninit}};
 
 use bitfield::bitfield;
 use cty::c_void;
 
 /// 割り込みベクタ。各割り込み要因に対応するInterruptDescriptorが格納される。
-static mut IDT: [MaybeUninit<InterruptDescriptor>; 256] = unsafe{MaybeUninit::uninit().assume_init()};
+static mut IDT: [InterruptDescriptor; 256] = [ZERO_DESCRIPTOR; 256];
 
 /// 割り込みベクタの`index`で指定されたスロットに`entry`を格納する
 pub fn set_idt_entry(index: IVIndex, entry: InterruptDescriptor) {
     unsafe {
         println!("IDT entry at {}", &IDT[index as usize] as *const _ as u64);
         println!("entry: {:?}", &entry);
-        IDT[index as usize] = MaybeUninit::new(entry);
+        IDT[index as usize] = entry;
     }
 }
 
 /// IDTのサイズとオフセットをCPUに登録する。内部でx86_64のlidt命令を呼ぶ。
 pub fn load_idt() {
     unsafe {
-        let limit = (size_of::<[MaybeUninit<InterruptDescriptor>; 256]>()-1) as u16;
+        let limit = (size_of::<[InterruptDescriptor; 256]>()-1) as u16;
         let offset = &IDT as *const _;
         println!("load_idt: limit={}, offser={}", limit, offset as u64);
         _load_idt(limit, offset);
@@ -92,7 +92,16 @@ impl InterruptDescriptor {
             offset_high: (offset as u64 >> 32) as u32
         }
     }
+
+    const fn zero() -> Self {
+        unsafe {
+            // safety: this will set present bit to zero
+            mem::transmute([0u8;size_of::<InterruptDescriptor>()])
+        }
+    }
 }
+
+const ZERO_DESCRIPTOR : InterruptDescriptor = InterruptDescriptor::zero();
 
 impl Debug for InterruptDescriptorAttribute {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
@@ -112,7 +121,7 @@ impl InterruptDescriptorAttribute {
 }
 
 extern "sysv64" {
-    fn _load_idt(limit: u16, offset: *const MaybeUninit<InterruptDescriptor>);
+    fn _load_idt(limit: u16, offset: *const InterruptDescriptor);
 } 
 
 global_asm!(r#"

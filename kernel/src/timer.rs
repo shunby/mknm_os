@@ -21,6 +21,12 @@ pub struct Timer {
     value: u64
 }
 
+impl Timer {
+    fn is_over(&self, current_time: u64) -> bool {
+        self.timeout < current_time
+    }
+}
+
 impl Ord for Timer {
     // self <= other :=: self.timeout >= other.timeout
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
@@ -46,20 +52,23 @@ impl TimerManager {
     }
 
     pub fn tick(&mut self, elapsed: u64) {
-        unsafe {
-            let t = read_volatile(&self.tick as *const u64);
-            write_volatile(&mut self.tick as *mut u64, t+elapsed);
-        }
+        self.inc_tick_volatile(elapsed);
         
-        while self.timers.peek().map_or(false, |top|top.timeout <= self.tick) {
+        while self.timers.peek().filter(|top|top.is_over(self.tick)).is_some() {
             let top = self.timers.pop().unwrap();
             let _ = EVENTS.lock().push(crate::Message::TimerTimeout(top.value));
         }
-
     }
 
     pub fn add_timer(&mut self, timeout: u64, value: u64) {
         self.timers.push(Timer {timeout, value});
+    }
+
+    fn inc_tick_volatile(&mut self, elapsed: u64) {
+        unsafe {
+            let t = read_volatile(&self.tick as *const u64);
+            write_volatile(&mut self.tick as *mut u64, t+elapsed);
+        }
     }
 }
 

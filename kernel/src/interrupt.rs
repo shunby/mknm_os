@@ -2,6 +2,7 @@ use core::{arch::{asm, global_asm}, fmt::{Debug, Formatter, Result, Write}, iter
 
 use bitfield::bitfield;
 use cty::c_void;
+use crate::println;
 
 /// 割り込みベクタ。各割り込み要因に対応するInterruptDescriptorが格納される。
 static mut IDT: [InterruptDescriptor; 256] = [ZERO_DESCRIPTOR; 256];

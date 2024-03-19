@@ -49,6 +49,7 @@ use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 use window::LayeredWindowManager;
 
 use crate::asm::get_cr3;
+use crate::console::init_console;
 use crate::font::{write_ascii, write_string};
 use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
 use crate::graphics::Vec2;
@@ -92,7 +93,6 @@ const LOGO: [u64;26] = [
     0b00000000000000000000001111110000000,
 ];
 
-static CONSOLE: LazyInit<Console> = LazyInit::new();
 static LAYERS: LazyInit<LayeredWindowManager> = LazyInit::new();
 static EVENTS: LazyInit<MessageQueue<1024>> = LazyInit::new();
 
@@ -239,11 +239,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     acpi::initialize(&*rsdp);
     initialize_timer();
 
-    CONSOLE.lock().init(Console::new(  
-        console_window_hndl,
-        (255,255,255),
-        (100,100,100)
-    ));
+    init_console(console_window_hndl, (255,255,255), (100,100,100));
     
     let pci = scan_pci_devices();
 

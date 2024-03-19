@@ -48,6 +48,7 @@ use crate::{
         runtime::{new_channel, new_executor_and_spawner},
         usbd::UsbDriver,
     },
+    println,
 };
 
 use super::{

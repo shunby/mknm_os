@@ -1,7 +1,7 @@
 /// Peripheral Component Interconnect (PCI) デバイス
 
 use core::{mem::{MaybeUninit, transmute, transmute_copy}};
-use crate::asm;
+use crate::{asm, println};
 use bitfield::bitfield;
 
 fn make_address(bus: u8, device: u8, function: u8, reg_addr: u8) -> u32 {

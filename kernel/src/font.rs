@@ -85,53 +85,6 @@ impl IntoU8s for &mut [u8] {
     }
 }
 
-#[macro_export]
-macro_rules! join_to_u8s {
-    ($buf:expr, $x:expr) => {{
-        $x.into_u8s($buf)
-    }};
-    ($buf:expr, $x: expr, $($y: expr),*) => {{
-        let mut xbuf = [0u8;128];
-        let x = $x.into_u8s(&mut xbuf);
-        
-        let len = $buf.len();
-        if x.len() > len {
-            $buf.copy_from_slice(&x[..len]); $buf
-        } else {
-            let mut ybuf = [0u8; 128];
-            let y = join_to_u8s!(&mut ybuf, $($y),*);
-            crate::font::concat_u8s(x, &y[..usize::min(y.len(), len-x.len())], $buf)
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! println {
-    () => {
-        $crate::print!("\n")
-    };
-    ($($arg:tt)*) => {{
-        $crate::font::_print(core::format_args!($($arg)*));
-        $crate::print!("\n")
-
-    }};
-}
-
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        $crate::font::_print(core::format_args!($($arg)*));
-    }};
-}
-
-pub fn _print(args: core::fmt::Arguments) {
-    use core::fmt::Write;
-    without_interrupts(|| {
-        crate::CONSOLE.lock().write_fmt(args).unwrap();
-    });
-}
-
 const FONTS: &[[u8;16]] = &[
 [
 0b00000000,

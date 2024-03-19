@@ -2,8 +2,11 @@ use core::iter::repeat_with;
 
 use alloc::vec::Vec;
 use lock_api::MutexGuard;
+use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, memory_manager::SingleMutex, window::{LayerHandle, LayerId, Window}, PixelWriter, LAYERS};
+use crate::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, memory_manager::{LazyInit, SingleMutex}, window::{LayerHandle, LayerId, Window}, PixelWriter, LAYERS};
+
+static CONSOLE: LazyInit<Console> = LazyInit::new();
 
 const CHAR_W: usize = 8;
 const CHAR_H: usize = 16;
@@ -16,6 +19,36 @@ pub struct Console {
     buffer: Vec<Vec<u8>>,
     cursor_row: usize,
     cursor_col: usize
+}
+
+pub fn init_console(layer_handle: LayerHandle, fg_color: (u8, u8, u8), bg_color: (u8, u8, u8)) {
+    CONSOLE.lock().init(Console::new(layer_handle, fg_color, bg_color));
+}
+
+#[macro_export]
+macro_rules! println {
+    () => {
+        $crate::print!("\n")
+    };
+    ($($arg:tt)*) => {{
+        $crate::console::_print(core::format_args!($($arg)*));
+        $crate::print!("\n")
+
+    }};
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        $crate::console::_print(core::format_args!($($arg)*));
+    }};
+}
+
+pub fn _print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    without_interrupts(|| {
+        CONSOLE.lock().write_fmt(args).unwrap();
+    });
 }
 
 impl Console {

@@ -4,7 +4,6 @@
 #![feature(alloc_error_handler)]
 #![feature(allocator_api)]
 
-mod frame_buffer;
 mod graphic;
 #[macro_use]
 mod console;
@@ -37,8 +36,9 @@ use acpi::RSDP;
 use alloc::collections::VecDeque;
 use alloc::string::ToString;
 use console::Console;
-use frame_buffer::FrameBufferRaw;
+use graphic::frame_buffer::FrameBufferRaw;
 use graphic::graphics::PixelWriter;
+use graphic::with_layers;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
 use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
@@ -49,7 +49,6 @@ use graphic::window::LayeredWindowManager;
 use crate::asm::get_cr3;
 use crate::console::init_console;
 use crate::graphic::font::{write_ascii, write_string};
-use crate::frame_buffer::{FrameBuffer, set_default_pixel_format};
 use crate::graphic::graphics::Vec2;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
@@ -91,7 +90,6 @@ const LOGO: [u64;26] = [
     0b00000000000000000000001111110000000,
 ];
 
-static LAYERS: LazyInit<LayeredWindowManager> = LazyInit::new();
 static EVENTS: LazyInit<MessageQueue<1024>> = LazyInit::new();
 
 fn scan_pci_devices() -> PCIController {
@@ -194,33 +192,25 @@ pub fn draw_window(window: &mut Window, title: &[u8]) {
 
 }
 
-unsafe fn initialize_windows(fb: *const FrameBufferRaw) -> (graphic::window::LayerHandle, graphic::window::LayerHandle, graphic::window::LayerHandle) {
-    let mut fb = FrameBuffer::from_raw(fb);
-    set_default_pixel_format(fb.pixel_format());
-    LAYERS.lock().init(LayeredWindowManager::new(fb));
-    
-    
-    let mut layer_mgr = LAYERS.lock();
+unsafe fn initialize_windows() -> (graphic::window::LayerHandle, graphic::window::LayerHandle) {
+    with_layers(|layer_mgr|{
+        let mut mouse_window = Window::new(15, 24);
+        mouse_window.set_transparent_color(Some((1,1,1)));
+        draw_cursor(&mut mouse_window);
 
-    let mut mouse_window = Window::new(15, 24);
-    mouse_window.set_transparent_color(Some((1,1,1)));
-    draw_cursor(&mut mouse_window);
-    let mouse_window_hndl = layer_mgr.new_layer(mouse_window);
-
-    let console_window = Window::new(layer_mgr.resolution().0 as usize, layer_mgr.resolution().1 as usize);
-    let console_window_hndl = layer_mgr.new_layer(console_window);
-
-    let mut test_window = Window::new(160, 68);
-    test_window.move_to((100,200).into());
-    write_string(&mut test_window, 24, 28, "Welcome to".as_bytes(), (0,0,0));
-    write_string(&mut test_window, 24, 44, "Mikanami world!".as_bytes(), (0,0,0));
-    draw_window(&mut test_window, "test window".as_bytes());
-    let test_window_hndl = layer_mgr.new_layer(test_window);
-
-    layer_mgr.up_down(console_window_hndl.layer_id(), 0);
-    layer_mgr.up_down(test_window_hndl.layer_id(), 1);
-    layer_mgr.up_down(mouse_window_hndl.layer_id(), 2);
-    (mouse_window_hndl, console_window_hndl, test_window_hndl)
+        let mouse_window_hndl = layer_mgr.new_layer(mouse_window);
+        
+        let mut test_window = Window::new(160, 68);
+        test_window.move_to((100,200).into());
+        write_string(&mut test_window, 24, 28, "Welcome to".as_bytes(), (0,0,0));
+        write_string(&mut test_window, 24, 44, "Mikanami world!".as_bytes(), (0,0,0));
+        draw_window(&mut test_window, "test window".as_bytes());
+        let test_window_hndl = layer_mgr.new_layer(test_window);
+        
+        layer_mgr.up_down(test_window_hndl.layer_id(), 1);
+        layer_mgr.up_down(mouse_window_hndl.layer_id(), 2);
+        (mouse_window_hndl, test_window_hndl)
+    })
 }
 
 pub static mut TASK_A_CTX: TaskContext = TaskContext::new();
@@ -233,11 +223,13 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
     setup_identity_page_table();
     init_allocators(&memmap);
     set_interrupt_flag(false);   
-    let (mouse_window_hndl, console_window_hndl, test_window_hndl) = initialize_windows(fb);
+
+    graphic::initialize_winmgr(fb);
+    let (mouse_window_hndl, test_window_hndl) = initialize_windows();
     acpi::initialize(&*rsdp);
     initialize_timer();
 
-    init_console(console_window_hndl, (255,255,255), (100,100,100));
+    init_console((255,255,255), (100,100,100));
     
     let pci = scan_pci_devices();
 
@@ -271,15 +263,14 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 
     initialize_xhci(xhc, intel_ehci_found, move |report| {
         {
-            let (display_width, display_height) = LAYERS.lock().resolution();
+            let (display_width, display_height) = with_layers(|l|l.resolution());
             let (dx,dy) = (report.dx(), report.dy());
             {
                 let mut window = mouse_window_hndl.window().lock();
                 let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
                 window.move_to(new_pos);
             }
-            let mut layers = LAYERS.lock();
-            layers.draw();
+            with_layers(|l|l.draw());
         }
     });
 
@@ -330,8 +321,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
                 window.fill_rect((24,28).into(), (8*10,16).into(), (0xc6, 0xc6, 0xc6));
                 write_string(&mut *window, 24, 28, tick.to_string().as_bytes(), (0,0,0));
             }
-            let mut layers = LAYERS.lock();
-            layers.draw();
+            with_layers(|l|l.draw());
         }
 
         match msg {

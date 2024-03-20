@@ -8,6 +8,7 @@ use alloc::{boxed::Box, vec::Vec};
 use xhci::{context::EndpointType, ring::trb::command::ConfigureEndpoint};
 
 use crate::usb::xhci::SPAWNER;
+use crate::println;
 
 use super::{
     class::mouse::{MouseClass, MouseReport},

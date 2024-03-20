@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lock_api::MutexGuard;
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{graphic::font::{write_ascii, write_string}, graphic::graphics::{PixelColor, Rect}, memory_manager::{LazyInit, SingleMutex}, graphic::window::{LayerHandle, LayerId, Window}, PixelWriter, LAYERS};
+use crate::{graphic::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, window::{LayerHandle, LayerId, Window}, with_layers}, memory_manager::{LazyInit, SingleMutex}, PixelWriter};
 
 static CONSOLE: LazyInit<Console> = LazyInit::new();
 
@@ -21,8 +21,16 @@ pub struct Console {
     cursor_col: usize
 }
 
-pub fn init_console(layer_handle: LayerHandle, fg_color: (u8, u8, u8), bg_color: (u8, u8, u8)) {
-    CONSOLE.lock().init(Console::new(layer_handle, fg_color, bg_color));
+/// コンソールとコンソールウィンドウを初期化
+pub fn init_console(fg_color: (u8, u8, u8), bg_color: (u8, u8, u8)) {
+    with_layers(|l| {
+        let res = l.resolution();
+        let win = Window::new(res.0 as usize, res.1 as usize);
+        let hndl = l.new_layer(win);
+
+        l.up_down(hndl.layer_id(), 0);
+        CONSOLE.lock().init(Console::new(hndl, fg_color, bg_color));
+    });
 }
 
 #[macro_export]
@@ -111,8 +119,7 @@ impl Console {
             }
             
         }}
-        let mut layers = LAYERS.lock();
-        layers.draw();
+        with_layers(|l|l.draw());
     }
     
 

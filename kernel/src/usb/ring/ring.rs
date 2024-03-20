@@ -5,7 +5,7 @@ use core::{
 
 use xhci::ring::trb::Link;
 
-use super::xhci::{UnknownTRB, XhciError};
+use crate::usb::xhci::{UnknownTRB, XhciError};
 
 use alloc::vec::Vec;
 
@@ -97,13 +97,13 @@ impl ProducerRing {
     }
 }
 
-pub struct EventRing {
+pub struct ConsumerRing {
     data: Vec<UnknownTRB>,
     cycle_state: bool,
     deque: usize,
 }
 
-impl EventRing {
+impl ConsumerRing {
     pub fn new(size: usize) -> Self {
         let data: Vec<UnknownTRB> = repeat_with(UnknownTRB::default).take(size).collect();
 
@@ -164,7 +164,7 @@ fn dump_command_ring(ring: &ProducerRing) {
     }
 }
 
-pub fn dump_event_ring(ring: &EventRing) {
+pub fn dump_event_ring(ring: &ConsumerRing) {
     for i in 0..ring.size() {
         if ring.data[i].cycle_bit() == ring.cycle_state() {
             let trb = unsafe { ring.data[i].into_event_trb() }

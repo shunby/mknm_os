@@ -35,6 +35,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use acpi::RSDP;
 use alloc::collections::VecDeque;
 use alloc::string::ToString;
+use alloc::boxed::Box;
 use console::Console;
 use graphic::frame_buffer::FrameBufferRaw;
 use graphic::graphics::PixelWriter;
@@ -57,6 +58,7 @@ use crate::paging::setup_identity_page_table;
 use crate::segment::{setup_segments, KERNEL_CS, KERNEL_SS};
 use crate::task::{switch_context, TaskContext};
 use crate::timer::{add_timer, get_current_tick, initialize_timer};
+use crate::usb::init_usb;
 use crate::usb::xhci::initialize_xhci;
 use crate::graphic::window::Window;
 
@@ -261,7 +263,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         dev.read_vendor_id() == 0x8086 &&  dev.read_class_code().matches(0x0c, 0x03, 0x20) 
     });
 
-    initialize_xhci(xhc, intel_ehci_found, move |report| {
+    init_usb(xhc, intel_ehci_found, Box::new(move |report| {
         {
             let (display_width, display_height) = with_layers(|l|l.resolution());
             let (dx,dy) = (report.dx(), report.dy());
@@ -272,7 +274,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             }
             with_layers(|l|l.draw());
         }
-    });
+    }));
 
     print!("finish\n");
     // LAYERS.lock().draw();
@@ -325,7 +327,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
         }
 
         match msg {
-            Some(Message::Xhci) => usb::xhci::run_xhci_tasks(),
+            Some(Message::Xhci) => usb::on_xhc_interrupt(),
             Some(Message::TimerTimeout(val)) => match val {
                 1 => {
                     let tick = get_current_tick();

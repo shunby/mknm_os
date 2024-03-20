@@ -5,10 +5,7 @@ use xhci::ring::trb::{
 };
 
 use crate::usb::{
-    usbd::{Descriptor, UsbInterfaceAlternate},
-    xhci::{
-        push_transfer_trb_async, ring_doorbell, ControlRequestType, SetupData, XhciError, XHCI,
-    },
+    ring::transfer::{ControlRequestType, SetupData}, usbd::{Descriptor, UsbInterfaceAlternate}, xhci::{control_request, push_transfer_trb, with_regs, XhciError}
 };
 
 use alloc::boxed::Box;
@@ -66,8 +63,7 @@ impl MouseClass {
             index: self.interface as u16,
             length: 0,
         };
-        let recv = XHCI.lock().control_request(self.slot_id, setup, None)?;
-        recv.await.unwrap().map_err(XhciError::TransferError)?;
+        control_request(self.slot_id, setup, None)?.await.unwrap()?;
 
         Ok(())
     }
@@ -76,7 +72,7 @@ impl MouseClass {
         &self,
     ) -> Result<
         (
-            oneshot::Receiver<Result<trb::event::TransferEvent, trb::event::TransferEvent>>,
+            oneshot::Receiver<Result<trb::event::TransferEvent, XhciError>>,
             Box<MouseReport>,
         ),
         XhciError,
@@ -86,9 +82,8 @@ impl MouseClass {
         trb.set_interrupt_on_completion()
             .set_data_buffer_pointer(buf.as_ref() as *const MouseReport as u64)
             .set_trb_transfer_length(8);
-        let recv = push_transfer_trb_async(self.slot_id, self.dci, transfer::Allowed::Normal(trb))?
-            .unwrap();
-        ring_doorbell(self.slot_id, self.dci as u8);
+        let recv = push_transfer_trb(self.slot_id, self.dci, transfer::Allowed::Normal(trb))?.unwrap();
+        with_regs(|r|r.doorbell.update_volatile_at(self.slot_id, |d|{d.set_doorbell_target(self.dci as u8);}));
         Ok((recv, buf))
     }
 }

@@ -1,19 +1,15 @@
 use core::{
     fmt::{self, Debug, Formatter},
-    mem::transmute,
     slice::from_raw_parts,
 };
 
 use alloc::{boxed::Box, vec::Vec};
-use xhci::{context::EndpointType, ring::trb::command::ConfigureEndpoint};
+use xhci::{context::EndpointType, ring::trb::{self, command::ConfigureEndpoint}};
 
-use crate::usb::xhci::SPAWNER;
-use crate::println;
+use crate::{println, usb::{device::InputContext, spawn, xhci::{push_command, with_dcbaa, with_trf_rings}}};
 
 use super::{
-    class::mouse::{MouseClass, MouseReport},
-    runtime::Receiver,
-    xhci::{emit_command_async, ControlRequestType, InputContext, SetupData, XhciError, XHCI},
+    class::mouse::{MouseClass, MouseReport}, ring::transfer::{ControlRequestType, SetupData}, runtime::Receiver, xhci::{control_request, XhciError}
 };
 
 use bitfield::bitfield;
@@ -182,8 +178,7 @@ impl UsbDevice {
             index: 0,
             length: 0,
         };
-        let recv = XHCI.lock().control_request(self.slot_id, setup, None)?;
-        recv.await.unwrap().map_err(XhciError::TransferError)?;
+        let _ = control_request(self.slot_id, setup, None)?.await.unwrap()?;
 
         self.config_selected = Some(config);
         self.alternates_selected
@@ -208,23 +203,21 @@ impl UsbDevice {
             index: interface as u16,
             length: 0,
         };
-        let recv = XHCI.lock().control_request(self.slot_id, setup, None)?;
-        recv.await.unwrap().map_err(XhciError::TransferError)?;
+        let _ = control_request(self.slot_id, setup, None)?.await.unwrap()?;
 
         Ok(())
     }
 
     async fn enable_endpoints(&mut self) -> Result<(), XhciError> {
-        let mut input_ctx = InputContext::new(XHCI.lock().context_size());
+        let mut input_ctx = InputContext::new(with_dcbaa(|d|d.ctx_size()));
         input_ctx
             .handler_mut()
             .control_mut()
             .set_add_context_flag(0);
         {
-            let lock = XHCI.lock();
-            lock.with_device_at(self.slot_id, |dev| {
+            with_dcbaa(|dcbaa| {
                 let this = input_ctx.handler_mut().device_mut().slot_mut();
-                let other = dev.context().handler().slot();
+                let other = dcbaa.get_context_at(self.slot_id).handler().slot();
                 this.set_route_string(0);
                 this.set_root_hub_port_number(other.root_hub_port_number());
                 this.set_interrupter_target(0);
@@ -263,7 +256,7 @@ impl UsbDevice {
                     });
                     ep_context.set_max_packet_size(ep.max_packet_size);
                     ep_context.set_max_burst_size(0);
-                    let ring_ptr = XHCI.lock().init_trf_ring(self.slot_id, dci);
+                    let ring_ptr = with_trf_rings(|r|r.init_ring_at(self.slot_id, dci));
                     ep_context.set_tr_dequeue_pointer(ring_ptr);
                     ep_context.set_dequeue_cycle_state();
                     ep_context.set_interval(ep.interval);
@@ -286,7 +279,7 @@ impl UsbDevice {
         cmd.set_slot_id(self.slot_id as u8);
         cmd.set_input_context_pointer(input_ctx.get_address());
         println!("{:?}", input_ctx);
-        emit_command_async(unsafe { transmute(cmd) }).await?;
+        push_command(trb::command::Allowed::ConfigureEndpoint(cmd))?.await.unwrap();
         Ok(())
     }
 }
@@ -513,7 +506,7 @@ impl UsbDriver {
                 let mouse = MouseClass::new(slot_id, intf).unwrap();
                 mouse.initialize().await?;
 
-                SPAWNER.lock().spawn(async move {
+                spawn(async move {
                     loop {
                         let (recv, buf) = mouse.subscribe_once()?;
                         if recv.await.unwrap().is_ok() {
@@ -553,10 +546,7 @@ impl UsbDriver {
             length: 18,
         };
 
-        let recv = XHCI
-            .lock()
-            .control_request(slot_id, setup, Some(&mut dev_desc.0))?;
-        recv.await.unwrap().map_err(XhciError::TransferError)?;
+        control_request(slot_id, setup, Some(&mut dev_desc.0))?.await.unwrap()?;
 
         Ok(*dev_desc.as_ref())
     }
@@ -575,10 +565,7 @@ impl UsbDriver {
             length: buf_sz as u16,
         };
 
-        let recv = XHCI
-            .lock()
-            .control_request(slot_id, setup, Some(&mut buf))?;
-        recv.await.unwrap().map_err(XhciError::TransferError)?;
+        control_request(slot_id, setup, Some(&mut buf))?.await.unwrap()?;
 
         let total_len = u16::from_le_bytes([buf[2], buf[3]]);
         if (total_len as usize) < buf_sz {

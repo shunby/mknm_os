@@ -6,10 +6,10 @@ use core::{
 use alloc::{boxed::Box, vec::Vec};
 use xhci::{context::EndpointType, ring::trb::{self, command::ConfigureEndpoint}};
 
-use crate::{println, usb::{device::InputContext, spawn, xhci::{push_command, with_dcbaa, with_trf_rings}}};
+use crate::{println, usb::{class::keyboard::KeyboardClass, device::InputContext, spawn, xhci::{push_command, with_dcbaa, with_trf_rings}}};
 
 use super::{
-    class::mouse::{MouseClass, MouseReport}, ring::transfer::{ControlRequestType, SetupData}, runtime::Receiver, xhci::{control_request, XhciError}
+    class::{keyboard::KeyReport, mouse::{MouseClass, MouseReport}}, ring::transfer::{ControlRequestType, SetupData}, runtime::Receiver, xhci::{control_request, XhciError}
 };
 
 use bitfield::bitfield;
@@ -460,16 +460,19 @@ fn construct_configuration(mut desc_arr: &[Descriptor]) -> Option<UsbConfigurati
 pub struct UsbDriver {
     address_device_notifier: Receiver<usize>,
     mouse_callback: Option<Box<dyn Fn(Box<MouseReport>) + Send>>,
+    keyboard_callback: Option<Box<dyn Fn(Box<KeyReport>) + Send>>,
 }
 
 impl UsbDriver {
     pub fn new(
         address_device_notifier: Receiver<usize>,
         mouse_callback: Box<dyn Fn(Box<MouseReport>) + Send>,
+        keyboard_callback: Box<dyn Fn(Box<KeyReport>) + Send>,
     ) -> Self {
         Self {
             address_device_notifier,
             mouse_callback: Some(mouse_callback),
+            keyboard_callback: Some(keyboard_callback)
         }
     }
 
@@ -509,6 +512,23 @@ impl UsbDriver {
                 spawn(async move {
                     loop {
                         let (recv, buf) = mouse.subscribe_once()?;
+                        if recv.await.unwrap().is_ok() {
+                            callback(buf);
+                        }
+                    }
+                })
+            } else if self.keyboard_callback.is_some()
+                && intf.class == 3
+                && intf.subclass == 1
+                && intf.protocol == 1
+            {
+                let callback = self.keyboard_callback.take().unwrap();
+                let key = KeyboardClass::new(slot_id, intf).unwrap();
+                key.initialize().await?;
+
+                spawn(async move {
+                    loop {
+                        let (recv, buf) = key.subscribe_once()?;
                         if recv.await.unwrap().is_ok() {
                             callback(buf);
                         }

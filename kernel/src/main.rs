@@ -274,6 +274,8 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             }
             with_layers(|l|l.draw());
         }
+    }), Box::new(move |report|{
+        println!("{:?}", report);
     }));
 
     print!("finish\n");

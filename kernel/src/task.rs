@@ -1,5 +1,13 @@
 use core::arch::global_asm;
 
+use alloc::collections::VecDeque;
+
+static mut TASKS: Option<TaskManager> = None;
+
+pub struct TaskManager {
+    ctxs: VecDeque<TaskContext>,
+}
+
 #[repr(C, align(16))]
 pub struct TaskContext {
     pub cr3: u64, pub rip: u64, pub rflags: u64, pub rsvd1: u64,
@@ -11,13 +19,51 @@ pub struct TaskContext {
     pub fxsave_area: [u32; 128]
 }
 
-extern "C" {
-    /// 現在のレジスタの値をcurrent_ctxに退避し、next_ctxに保存されたレジスタの値をCPUに反映する
-    pub fn switch_context(next_ctx: &TaskContext, current_ctx: &mut TaskContext);
+pub fn init_task_manager(ctx_taskB: TaskContext) {
+    let mut ctxs = VecDeque::new();
+    let ctx_main = TaskContext::new();
+    ctxs.push_back(ctx_main);
+    ctxs.push_back(ctx_taskB);
+
+    unsafe {TASKS = Some(TaskManager { ctxs });}
 }
 
+pub unsafe fn switch_tasks() {
+    TASKS.as_mut().unwrap().switch_tasks();
+}
+
+extern "C" {
+    /// 現在のレジスタの値をcurrent_ctxに退避し、next_ctxに保存されたレジスタの値をCPUに反映する
+    fn switch_context(next_ctx: &TaskContext, current_ctx: &mut TaskContext);
+}
+
+impl TaskManager {
+    pub unsafe fn switch_tasks(&mut self) {
+        let old_task = self.ctxs.pop_front().unwrap();
+        self.ctxs.push_back(old_task);
+
+        let (front, tail) = self.ctxs.as_mut_slices();
+        let (new_task, old_task) = {
+            if tail.is_empty() {
+                let (f, t) = front.split_at_mut(1);
+                (f.first().unwrap(), t.last_mut().unwrap())
+            } else {
+                (front.first().unwrap(), tail.last_mut().unwrap())
+            }
+        };
+        switch_context(new_task, old_task);
+    }
+}
+
+impl TaskContext {
+    pub const fn new() -> Self {
+        Self { cr3: 0, rip: 0, rflags: 0, rsvd1: 0, cs: 0, ss: 0, fs: 0, gs: 0, rax: 0, rbx: 0, rcx: 0, rdx: 0, rdi: 0, rsi: 0, rsp: 0, rbp: 0, r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0, fxsave_area: [0;128] }
+    }
+}
+
+
+
 global_asm!(r#"
-.globl switch_context
 switch_context:
     mov [rsi + 0x40], rax
     mov [rsi + 0x48], rbx
@@ -91,9 +137,3 @@ switch_context:
 
     iretq
 "#);
-
-impl TaskContext {
-    pub const fn new() -> Self {
-        Self { cr3: 0, rip: 0, rflags: 0, rsvd1: 0, cs: 0, ss: 0, fs: 0, gs: 0, rax: 0, rbx: 0, rcx: 0, rdx: 0, rdi: 0, rsi: 0, rsp: 0, rbp: 0, r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0, fxsave_area: [0;128] }
-    }
-}

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lock_api::MutexGuard;
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{graphic::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, window::{LayerHandle, LayerId, Window}, with_layers}, memory_manager::{LazyInit, SingleMutex}, PixelWriter};
+use crate::{graphic::{font::{write_ascii, write_string}, graphics::{PixelColor, Rect}, window::{LayerHandle, LayerId, Window}, with_layers}, memory_manager::{LazyInit, SpinMutex}, PixelWriter};
 
 static CONSOLE: LazyInit<Console> = LazyInit::new();
 
@@ -54,9 +54,7 @@ macro_rules! print {
 
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    without_interrupts(|| {
-        CONSOLE.lock().write_fmt(args).unwrap();
-    });
+    CONSOLE.lock().write_fmt(args).unwrap();
 }
 
 impl Console {
@@ -79,7 +77,7 @@ impl Console {
         Self { layer_handle, fg_color, bg_color, n_cols, n_rows, buffer, cursor_row: 0, cursor_col: 0 }
     }
 
-    fn scroll_up(& mut self, window_lock: &mut MutexGuard<'_, SingleMutex, Window>) {
+    fn scroll_up(& mut self, window_lock: &mut MutexGuard<'_, SpinMutex, Window>) {
         window_lock.move_rect((0,0).into(), Rect::from_points(0, 16, 8*self.n_cols as i32, 16*self.n_rows as i32));
 
         for y in 16*(self.n_rows-1)..16 * self.n_rows {
@@ -93,7 +91,7 @@ impl Console {
         self.buffer[self.n_rows-1].fill(0u8);
     }
 
-    fn new_line(& mut self, window_lock: &mut MutexGuard<'_, SingleMutex, Window>) {
+    fn new_line(& mut self, window_lock: &mut MutexGuard<'_, SpinMutex, Window>) {
         self.cursor_col = 0;
 
         if self.cursor_row < self.n_rows - 1 { 

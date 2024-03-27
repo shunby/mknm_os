@@ -1,5 +1,5 @@
-use crate::{graphic::{font::write_string, window::{self, Window}, with_layers}, task::{switch_context, TaskContext}, TASK_A_CTX, TASK_B_CTX};
-use crate::graphic::graphics::{PixelWriter};
+use crate::graphic::{font::write_string, window::{self, Window}, with_layers};
+use crate::graphic::graphics::PixelWriter;
 use crate::println;
 
 fn initialize_taskB_window() -> window::LayerHandle {
@@ -24,7 +24,5 @@ pub fn taskB() {
         win.window().lock().fill_rect((24,28).into(), (80,16).into(), (0xc6,0xc6,0xc6));
         write_string(&mut *win.window().lock(), 24, 28, a.as_bytes(), (0,0,0));
         println!("task B speaking!");
-        let t =unsafe{ &TASK_A_CTX};
-        unsafe {switch_context(&TASK_A_CTX, &mut TASK_B_CTX);}
     }
 }

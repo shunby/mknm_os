@@ -30,13 +30,10 @@ use core::panic::PanicInfo;
 use core::arch::{asm, global_asm};
 use core::ptr::write_volatile;
 use core::str::from_utf8;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use acpi::RSDP;
-use alloc::collections::VecDeque;
 use alloc::string::ToString;
 use alloc::boxed::Box;
-use console::Console;
 use graphic::frame_buffer::FrameBufferRaw;
 use graphic::graphics::PixelWriter;
 use graphic::with_layers;
@@ -45,18 +42,17 @@ use memory_manager::LazyInit;
 use memory_map::{MemoryMapRaw, MemoryMap};
 use pci::{PCIController, PCIDevice, configure_msi_fixed_destination};
 
-use graphic::window::LayeredWindowManager;
+use task::switch_tasks;
 
 use crate::asm::get_cr3;
 use crate::console::init_console;
-use crate::graphic::font::{write_ascii, write_string};
-use crate::graphic::graphics::Vec2;
+use crate::graphic::font::write_string;
 use crate::interrupt::set_interrupt_flag;
 use crate::memory_manager::init_allocators;
 use crate::mouse::draw_cursor;
 use crate::paging::setup_identity_page_table;
 use crate::segment::{setup_segments, KERNEL_CS, KERNEL_SS};
-use crate::task::{switch_context, TaskContext};
+use crate::task::{init_task_manager, TaskContext};
 use crate::timer::{add_timer, get_current_tick, initialize_timer};
 use crate::usb::init_usb;
 use crate::usb::xhci::initialize_xhci;
@@ -215,9 +211,6 @@ unsafe fn initialize_windows() -> (graphic::window::LayerHandle, graphic::window
     })
 }
 
-pub static mut TASK_A_CTX: TaskContext = TaskContext::new();
-pub static mut TASK_B_CTX: TaskContext = TaskContext::new();
-
 #[no_mangle]
 pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const MemoryMapRaw, rsdp: *const RSDP) -> ! {
     let memmap: MemoryMap = (&*mm).into();
@@ -280,40 +273,35 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 
     print!("finish\n");
     // LAYERS.lock().draw();
-    set_interrupt_flag(true);   
 
     let task_b_stack = vec![0u64;1024];
     let task_b_stack_end = (&task_b_stack[1023]) as *const u64 as u64 + 8;
 
-    TASK_B_CTX.rip = taskB::taskB as *const fn() as u64;
-    TASK_B_CTX.rdi = 1;
-    TASK_B_CTX.rsi = 42;
+    let mut task_b_ctx = TaskContext::new();
+    task_b_ctx.rip = taskB::taskB as *const fn() as u64;
+    task_b_ctx.rdi = 1;
+    task_b_ctx.rsi = 42;
 
-    TASK_B_CTX.cr3 = get_cr3();
-    TASK_B_CTX.rflags = 0x202;
-    TASK_B_CTX.cs = KERNEL_CS as u64;
-    TASK_B_CTX.ss = KERNEL_SS as u64;
-    TASK_B_CTX.rsp = (task_b_stack_end & !0xfu64) - 8;
-    TASK_B_CTX.fxsave_area[6] = 0x1f80;
+    task_b_ctx.cr3 = get_cr3();
+    task_b_ctx.rflags = 0x202;
+    task_b_ctx.cs = KERNEL_CS as u64;
+    task_b_ctx.ss = KERNEL_SS as u64;
+    task_b_ctx.rsp = (task_b_stack_end & !0xfu64) - 8;
+    task_b_ctx.fxsave_area[6] = 0x1f80;
+
+    init_task_manager(task_b_ctx);
+    set_interrupt_flag(true);   
     
     add_timer(get_current_tick() + 200, 1);
     add_timer(get_current_tick() + 600, 2);
 
     loop {
         set_interrupt_flag(false);
-        if EVENTS.lock().cnt == 0 && TIMER_ELAPSED.load(Ordering::Relaxed) == 0 {
+        if EVENTS.lock().cnt == 0 {
             set_interrupt_flag(true);
             asm!("hlt"); // 割り込みがあるまで休眠
             continue;
         }
-
-        let elapsed = TIMER_ELAPSED.swap(0, Ordering::Relaxed);
-        if elapsed > 0 {
-            timer::on_lapic_interrupt(elapsed);
-        }
-
-
-        // println!("{:?}", EVENTS.lock().data);
 
         let msg = EVENTS.lock().pop();
         set_interrupt_flag(true);
@@ -345,8 +333,6 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             }
             _ => ()
         }
-
-        switch_context(&TASK_B_CTX, &mut TASK_A_CTX);
     }
     
 }
@@ -434,10 +420,14 @@ extern "x86-interrupt" fn xhci_interrupt_handler() {
     notify_end_of_interrupt();
 }
 
-static TIMER_ELAPSED: AtomicU64 = AtomicU64::new(0);
 extern "x86-interrupt" fn lapic_interrupt_handler() {
-    TIMER_ELAPSED.fetch_add(1, Ordering::Relaxed);
+    let task_timer_timeout = timer::on_lapic_interrupt(1);
     notify_end_of_interrupt();
+    if task_timer_timeout {
+        unsafe {
+            switch_tasks();
+        }
+    }
 }
 
 fn notify_end_of_interrupt() {

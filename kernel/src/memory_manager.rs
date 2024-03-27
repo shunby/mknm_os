@@ -1,9 +1,5 @@
 use core::{
-    alloc::{GlobalAlloc, Layout},
-    cell::UnsafeCell,
-    mem::{transmute, MaybeUninit},
-    ptr::null_mut,
-    slice::from_raw_parts_mut,
+    alloc::{GlobalAlloc, Layout}, cell::UnsafeCell, mem::{transmute, MaybeUninit}, ptr::null_mut, slice::from_raw_parts_mut, sync::atomic::{AtomicBool, Ordering}
 };
 
 use bitfield::size_of;
@@ -45,7 +41,34 @@ unsafe impl RawMutex for SingleMutex {
 
 unsafe impl Sync for SingleMutex {}
 
-pub type Mutex<T> = lock_api::Mutex<SingleMutex, T>;
+pub struct SpinMutex {
+    locked: AtomicBool,
+}
+
+unsafe impl RawMutex for SpinMutex {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = Self {
+        locked: AtomicBool::new(false),
+    };
+    type GuardMarker = GuardNoSend;
+    fn lock(&self) {
+        while self.locked.swap(true, Ordering::Acquire) {
+            // asm!("hlt");
+        }
+    }
+
+    fn try_lock(&self) -> bool {
+        !self.locked.swap(true, Ordering::Acquire)
+    }
+
+    unsafe fn unlock(&self) {
+        self.locked.store(false, Ordering::Release);
+    }
+}
+
+unsafe impl Sync for SpinMutex {}
+
+pub type Mutex<T> = lock_api::Mutex<SpinMutex, T>;
 
 type FrameId = usize;
 
@@ -204,7 +227,7 @@ impl<T> LazyInit<T> {
         }
     }
 
-    pub fn lock(&self) -> MutexGuard<'_, SingleMutex, LazyInitVal<T>> {
+    pub fn lock(&self) -> MutexGuard<'_, SpinMutex, LazyInitVal<T>> {
         self.inner.lock()
     }
 }

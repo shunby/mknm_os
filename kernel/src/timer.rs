@@ -11,7 +11,11 @@ const INITIAL_COUNT_ADDR: *mut u32 = 0xfee00380 as *mut u32;
 const CURRENT_COUNT_ADDR: *mut u32 = 0xfee00390 as *mut u32;
 
 const COUNT_MAX: u32 = 0xffffffff;
-const TIMER_FREQ: u32 = 100;
+const TIMER_FREQ: u32 = 100; // per sec
+
+const TASK_TIMER_VALUE: u64 = u64::MIN;
+const TASK_TIMER_PERIOD: u64 = TIMER_FREQ as u64 / 50;
+
 static mut LAPIC_TIMER_FREQ: u32 = 0;
 
 static TIMER: LazyInit<TimerManager> = LazyInit::new();
@@ -51,13 +55,25 @@ impl TimerManager {
         Self {tick: 0, timers}
     }
 
-    pub fn tick(&mut self, elapsed: u64) {
+    /// returns task_timer_timeout
+    pub fn tick(&mut self, elapsed: u64) -> bool {
+        let mut task_timer_timeout = false;
+
         self.inc_tick_volatile(elapsed);
         
         while self.timers.peek().filter(|top|top.is_over(self.tick)).is_some() {
             let top = self.timers.pop().unwrap();
-            let _ = EVENTS.lock().push(crate::Message::TimerTimeout(top.value));
+
+            if top.value == TASK_TIMER_VALUE {
+                task_timer_timeout = true;
+                // タイマーをpopした直後なので、pushしてもメモリ割り当てが起こらない: 割り込み中に実行しても安全
+                self.timers.push(Timer {timeout: self.tick + TASK_TIMER_PERIOD, value: TASK_TIMER_VALUE});
+            } else {
+                let _ = EVENTS.lock().push(crate::Message::TimerTimeout(top.value));
+            }
         }
+
+        task_timer_timeout
     }
 
     pub fn add_timer(&mut self, timeout: u64, value: u64) {
@@ -108,11 +124,14 @@ fn stop_lapic_timer() {
 
 pub fn initialize_timer() {
     initialize_lapic_timer();
-    TIMER.lock().init(TimerManager::new());
+    let mut tmr_lock = TIMER.lock();
+    tmr_lock.init(TimerManager::new());
+    let timeout = tmr_lock.tick + TASK_TIMER_PERIOD;
+    tmr_lock.add_timer(timeout, TASK_TIMER_VALUE);
 }
 
-pub fn on_lapic_interrupt(elapsed: u64) {
-    TIMER.lock().tick(elapsed);
+pub fn on_lapic_interrupt(elapsed: u64) -> bool {
+    TIMER.lock().tick(elapsed)
 }
 
 pub fn get_current_tick() -> u64 {

@@ -113,14 +113,17 @@ impl LayerHandle {
 pub struct LayeredWindowManager {
     layers: Vec<Arc<RwLock<Window>>>,
     layer_stack: Vec<LayerId>,
+    shadow: FrameBuffer,
     buffer: FrameBuffer
 }
 
 impl LayeredWindowManager {
     pub fn new(buffer: FrameBuffer) -> Self {
+        let (width, height) = buffer.resolution();
         Self {
             layers: Vec::new(),
             layer_stack: Vec::new(),
+            shadow: FrameBuffer::new(width as usize, height as usize),
             buffer
         }
     }
@@ -141,8 +144,12 @@ impl LayeredWindowManager {
 
     pub fn draw(&mut self) {
         for id in &self.layer_stack {
-            self.layers[*id].read().draw_to(&mut self.buffer);
+            let win = self.layers[*id].read();
+            if win.buffer().is_updated() {
+                win.draw_to(&mut self.shadow);
+            }
         }
+        self.buffer.copy((0,0).into(), &self.shadow);
     }
 
     pub fn hide(&mut self, id: LayerId) {

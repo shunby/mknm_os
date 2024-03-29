@@ -34,7 +34,7 @@ use core::str::from_utf8;
 use acpi::RSDP;
 use alloc::string::ToString;
 use alloc::boxed::Box;
-use graphic::frame_buffer::FrameBufferRaw;
+use graphic::frame_buffer::{FrameBuffer, FrameBufferRaw};
 use graphic::graphics::PixelWriter;
 use graphic::with_layers;
 use interrupt::{set_idt_entry, IVIndex, InterruptDescriptor, InterruptDescriptorAttribute, DescriptorType, load_idt};
@@ -172,9 +172,8 @@ pub unsafe extern "sysv64" fn KernelMain(fb: *const FrameBufferRaw, mm: *const M
     }
 }
 
-pub fn draw_window(window: &mut Window, title: &[u8]) {
-    let win_h = window.height() as u32;
-    let win_w = window.width() as u32;
+pub fn draw_window(window: &mut FrameBuffer, title: &[u8]) {
+    let (win_w, win_h) = window.resolution();
     window.fill_rect((0,0).into(), (win_w,1).into(), (0xc6,0xc6,0xc6));
     window.fill_rect((1,1).into(), (win_w-2,1).into(), (0xff,0xff,0xff));
     window.fill_rect((0,0).into(), (1, win_h).into(), (0xc6,0xc6,0xc6));
@@ -194,15 +193,22 @@ unsafe fn initialize_windows() -> (graphic::window::LayerHandle, graphic::window
     with_layers(|layer_mgr|{
         let mut mouse_window = Window::new(15, 24);
         mouse_window.set_transparent_color(Some((1,1,1)));
-        draw_cursor(&mut mouse_window);
+        mouse_window.buffer().write_with(|back|{
+            draw_cursor(back);
+        });
+        mouse_window.buffer().flush();
 
         let mouse_window_hndl = layer_mgr.new_layer(mouse_window);
         
         let mut test_window = Window::new(160, 68);
         test_window.move_to((100,200).into());
-        write_string(&mut test_window, 24, 28, "Welcome to".as_bytes(), (0,0,0));
-        write_string(&mut test_window, 24, 44, "Mikanami world!".as_bytes(), (0,0,0));
-        draw_window(&mut test_window, "test window".as_bytes());
+        test_window.buffer().write_with(|back|{
+
+            write_string(back, 24, 28, "Welcome to".as_bytes(), (0,0,0));
+            write_string(back, 24, 44, "Mikanami world!".as_bytes(), (0,0,0));
+            draw_window(back, "test window".as_bytes());
+        });
+        test_window.buffer().flush();
         let test_window_hndl = layer_mgr.new_layer(test_window);
         
         layer_mgr.up_down(test_window_hndl.layer_id(), 1);
@@ -261,7 +267,7 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
             let (display_width, display_height) = with_layers(|l|l.resolution());
             let (dx,dy) = (report.dx(), report.dy());
             {
-                let mut window = mouse_window_hndl.window().lock();
+                let mut window = mouse_window_hndl.window().write();
                 let new_pos = (window.pos() + (dx as i32, dy as i32).into()).clamp((0,0).into(), (display_width as i32, display_height as i32).into());
                 window.move_to(new_pos);
             }
@@ -308,10 +314,12 @@ pub unsafe extern "sysv64" fn KernelMain2(fb: *const FrameBufferRaw, mm: *const 
 
         {
             {
-                let mut window = test_window_hndl.window().lock();
+                let window = test_window_hndl.window().read();
                 let tick = get_current_tick();
-                window.fill_rect((24,28).into(), (8*10,16).into(), (0xc6, 0xc6, 0xc6));
-                write_string(&mut *window, 24, 28, tick.to_string().as_bytes(), (0,0,0));
+                window.buffer().write_with(|back|{
+                    back.fill_rect((24,28).into(), (8*10,16).into(), (0xc6, 0xc6, 0xc6));
+                    write_string(back, 24, 28, tick.to_string().as_bytes(), (0,0,0));
+                });
             }
             with_layers(|l|l.draw());
         }

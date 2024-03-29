@@ -6,6 +6,7 @@ pub mod window;
 pub mod font;
 pub mod graphics;
 pub mod frame_buffer;
+pub mod buffered;
 
 static LAYERS: LazyInit<LayeredWindowManager> = LazyInit::new();
 

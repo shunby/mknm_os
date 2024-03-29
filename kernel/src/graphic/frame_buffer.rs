@@ -37,6 +37,13 @@ impl PixelFormat {
             }
         }
     }
+
+    pub fn raw_to_color(self, raw: &[u8]) -> (u8,u8,u8) {
+        match self {
+            PixelFormat::PixelBGRResv8BitPerColor => (raw[2], raw[1], raw[0]),
+            PixelFormat::PixelRGBResv8BitPerColor => (raw[0], raw[1], raw[2])
+        }
+    }
 }
 
 enum FrameBufferData {
@@ -198,6 +205,12 @@ impl FrameBuffer {
                 buf.copy_within(xs_from.0..xs_from.1, xs_to.0);
             }
         }
+    }
+
+    pub fn color_at(&self, x: usize, y: usize) -> (u8,u8,u8) {
+        let index = self.conf.to_index(x as i32, y as i32);
+        let len = self.pixel_format().bytes_per_pixel();
+        self.pixel_format().raw_to_color(&self.data.get()[index..index+len])
     }
 }
 

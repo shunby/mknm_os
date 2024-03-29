@@ -5,7 +5,11 @@ use crate::println;
 fn initialize_taskB_window() -> window::LayerHandle {
     let mut win = Window::new(160, 52);
     win.move_to((100,200).into());
-    crate::draw_window(&mut win, "taskB!".as_bytes());
+    win.buffer().write_with(|back|{
+        crate::draw_window(back, "taskB!".as_bytes());
+    });
+    win.buffer().flush();
+
     let handle = with_layers(|l|{
         let h = l.new_layer(win);
         l.up_down(h.layer_id(), 2);
@@ -21,8 +25,12 @@ pub fn taskB() {
     loop {
         cnt += 1;
         let a = format!("{:010}", cnt);
-        win.window().lock().fill_rect((24,28).into(), (80,16).into(), (0xc6,0xc6,0xc6));
-        write_string(&mut *win.window().lock(), 24, 28, a.as_bytes(), (0,0,0));
-        println!("task B speaking!");
+        let win = win.window().read();
+        win.buffer().write_with(|back|{
+            crate::draw_window(back, "taskB!".as_bytes());
+            back.fill_rect((24,28).into(), (80,16).into(), (0xc6,0xc6,0xc6));
+            write_string(back, 24, 28, a.as_bytes(), (0,0,0));
+        });
+        win.buffer().flush();
     }
 }
